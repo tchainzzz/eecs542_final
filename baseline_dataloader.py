@@ -1,3 +1,6 @@
+from argparse import ArgumentParser
+
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 from torchvision import datasets
@@ -9,7 +12,7 @@ class CorrelatedMNIST(Dataset):
         self,
         mode="train",
         spurious_feature_fn=T.RandomRotation(degrees=90),
-        spurious_corr_coeff=0.7,
+        spurious_match_prob=0.7,
         digits=[2, 8],
         normalize=False,
         seed=42,
@@ -20,7 +23,7 @@ class CorrelatedMNIST(Dataset):
         self.normalize = normalize
 
         self.spurious_feature_fn = spurious_feature_fn
-        self.spurious_corr_coeff = spurious_corr_coeff
+        self.spurious_match_prob = spurious_match_prob
         self.digits = digits
         if mode == "train":
             data = datasets.MNIST(
@@ -49,11 +52,11 @@ class CorrelatedMNIST(Dataset):
         """
             Randomly draw domain:
 
-            z ~ Ber(spurious_corr_coeff * y + (1 - spurious_corr_coeff) * (1-y))
+            z ~ Ber(sqrt(spurious_match_prob) * y + (1 - sqrt(spurious_match_prob)) * (1-y))
         """
-        domain_threshold = self.spurious_corr_coeff if y else 1 - self.spurious_corr_coeff
-        z = (torch.rand(1) < domain_threshold).int()
-        if z:
+        domain_threshold = self.spurious_match_prob if y else 1 - self.spurious_match_prob
+        z = (torch.rand(1) < domain_threshold).int().squeeze()
+        if z == 1:
             X = self.spurious_feature_fn(X)
         if self.normalize:
             X = T.Normalize(
@@ -65,7 +68,29 @@ class CorrelatedMNIST(Dataset):
     def __len__(self):
         return len(self.labels)
 
+if __name__ == '__main__':
+    print("Testing correlation...")
 
+    psr = ArgumentParser()
+    psr.add_argument("--corr", type=float, default=0.7)
+    psr.add_argument("--tol", type=float, default=0.1)
+    psr.add_argument("--seed", type=int, default=42)
+    args = psr.parse_args()
+
+    dataset = CorrelatedMNIST(
+            spurious_match_prob=args.corr,
+            seed=args.seed,
+        )
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1000)
+    _, all_y, all_z = next(iter(dataloader))
+     
+    print("Results:")
+    p_match = np.count_nonzero(all_y == all_z) / len(all_z)
+    print("% match:", p_match)
+    if np.abs(p_match - args.corr) > args.tol:
+        print(f"FAIL (tol: {args.tol})")
+    else:
+        print("OK")
 
 
 
