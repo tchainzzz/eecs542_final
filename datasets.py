@@ -15,6 +15,7 @@ class CorrelatedWILDSDataset(Dataset):
         self,
         dataset_name,
         mode="train",
+        transform=None,
         root_dir="./data/",
         size=96,  # 448 for iwildcam
         domains=[0, 1],
@@ -23,6 +24,7 @@ class CorrelatedWILDSDataset(Dataset):
     ):
         torch.manual_seed(seed)
         self.normalize = normalize
+        self.transform = transform
         self.root_dir = root_dir
         self.dataset_name = dataset_name
         self.preprocess = T.Compose(
@@ -59,6 +61,8 @@ class CorrelatedWILDSDataset(Dataset):
     def __getitem__(self, idx):
         X = self.get_input(idx)
         X = self.preprocess(X)
+        if self.transform:
+            X = self.transform(X)
         if self.normalize:
             X = T.Normalize(
                     mean=[0.485, 0.456, 0.406],
@@ -96,6 +100,7 @@ class CorrelatedMNIST(Dataset):
     def __init__(
         self,
         mode="train",
+        transform=None,
         spurious_feature_fn=T.RandomRotation(degrees=90),
         spurious_match_prob=0.7,
         digits=[2, 8],
@@ -106,6 +111,7 @@ class CorrelatedMNIST(Dataset):
 
         self.mode = mode
         self.normalize = normalize
+        self.transform = transform
 
         self.spurious_feature_fn = spurious_feature_fn
         self.spurious_match_prob = spurious_match_prob
@@ -143,6 +149,8 @@ class CorrelatedMNIST(Dataset):
         z = (torch.rand(1) < domain_threshold).int().squeeze()
         if z == 1:
             X = self.spurious_feature_fn(X)
+        if self.transform:
+            X = self.transform(X)
         if self.normalize:
             X = T.Normalize(
                     mean=[0.485, 0.456, 0.406],
