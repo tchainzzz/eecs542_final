@@ -20,3 +20,10 @@ For the CorrelatedMNIST dataset, the degree of spurious correlation is specified
 
 The DataLoaders will yield tuples of the form `(X, y, z)`, where X is an image, y is the label, and z is the domain info.
 
+### Testing the correlation sampler
+
+This command will check to see if Pr[Y == Z] in a batch is near (`--tol`) the expected probability specified using the `--corr` argument.
+```
+python datasets.py --seed [YOUR_SEED_HERE] --dataset ['mnist' or 'wilds'] --corr [YOUR_CORRELATION] --tol [YOUR_ERROR_TOLERANCE]
+```
+
