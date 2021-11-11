@@ -43,8 +43,13 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             running_loss = 0.0
             running_corrects = 0
 
+
+            index = 0
             # Iterate over data.
             for inputs, labels, domains in dataloaders[phase]:
+
+                index += 1
+                print("batch: " + str(index) + "/" + str(len(dataloaders[phase])))
                 inputs = inputs.to(device)
                 labels = labels.to(device)
 
