@@ -138,7 +138,7 @@ class CorrelatedMNIST(Dataset):
         self.images = data.data[idx1 | idx2]
 
     def __getitem__(self, idx):
-        X = self.images[idx].unsqueeze(0)
+        X = self.images[idx].unsqueeze(0).float()
         X = X.repeat([3, 1, 1])
         y = self.labels[idx]
         """
