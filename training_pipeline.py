@@ -10,29 +10,16 @@ import matplotlib.pyplot as plt
 import time
 import os
 import copy
-print("PyTorch Version: ",torch.__version__)
-print("Torchvision Version: ",torchvision.__version__)
 
-
-# Top level data directory. Here we assume the format of the directory conforms
-#   to the ImageFolder structure
-data_dir = "./data/hymenoptera_data"
-
-# Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception]
-model_name = "squeezenet"
-
-# Number of classes in the dataset
-num_classes = 2
+import datasets
+from argparse import ArgumentParser
+from torch.utils.data import Dataset, DataLoader
 
 # Batch size for training (change depending on how much memory you have)
 batch_size = 8
 
-# Number of epochs to train for
-num_epochs = 15
-
-# Flag for feature extracting. When False, we finetune the whole model,
-#   when True we only update the reshaped layer params
-feature_extract = True
+# Detect if we have a GPU available
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False):
     since = time.time()
@@ -57,7 +44,7 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             running_corrects = 0
 
             # Iterate over data.
-            for inputs, labels in dataloaders[phase]:
+            for inputs, labels, domains in dataloaders[phase]:
                 inputs = inputs.to(device)
                 labels = labels.to(device)
 
@@ -191,71 +178,142 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
 
     return model_ft, input_size
 
-# Initialize the model for this run
-model_ft, input_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
-
-# Print the model we just instantiated
-print(model_ft)
 
 
-
-#----------------------------------- LOAD DATA -----------------------------------
-# Data augmentation and normalization for training
-# Just normalization for validation
-data_transforms = {
-    'train': transforms.Compose([
-        transforms.RandomResizedCrop(input_size),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ]),
-    'val': transforms.Compose([
-        transforms.Resize(input_size),
-        transforms.CenterCrop(input_size),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ]),
-}
-
-print("Initializing Datasets and Dataloaders...")
-
-# Create training and validation datasets
-image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x]) for x in ['train', 'val']}
-# Create training and validation dataloaders
-dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=4) for x in ['train', 'val']}
-
-# Detect if we have a GPU available
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+def tutorialNonFunctionCode(dataloader):
+    print("PyTorch Version: ",torch.__version__)
+    print("Torchvision Version: ",torchvision.__version__)
 
 
-#----------------------------------- OPTIMIZER -----------------------------------
-# Send the model to GPU
-model_ft = model_ft.to(device)
+    # Top level data directory. Here we assume the format of the directory conforms
+    #   to the ImageFolder structure
+    data_dir = "./data/"
 
-# Gather the parameters to be optimized/updated in this run. If we are
-#  finetuning we will be updating all parameters. However, if we are
-#  doing feature extract method, we will only update the parameters
-#  that we have just initialized, i.e. the parameters with requires_grad
-#  is True.
-params_to_update = model_ft.parameters()
-print("Params to learn:")
-if feature_extract:
-    params_to_update = []
-    for name,param in model_ft.named_parameters():
-        if param.requires_grad == True:
-            params_to_update.append(param)
-            print("\t",name)
-else:
-    for name,param in model_ft.named_parameters():
-        if param.requires_grad == True:
-            print("\t",name)
+    # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception]
+    model_name = "resnet"
 
-# Observe that all parameters are being optimized
-optimizer_ft = optim.SGD(params_to_update, lr=0.001, momentum=0.9)
+    # Number of classes in the dataset
+    num_classes = 2
 
-# Setup the loss fxn
-criterion = nn.CrossEntropyLoss()
+    
 
-# Train and evaluate
-model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=num_epochs, is_inception=(model_name=="inception"))
+    # Number of epochs to train for
+    num_epochs = 15
 
+    # Flag for feature extracting. When False, we finetune the whole model,
+    #   when True we only update the reshaped layer params
+    feature_extract = True
+
+    # Initialize the model for this run
+    model_ft, input_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
+
+    # Print the model we just instantiated
+    print(model_ft)
+
+
+
+    #----------------------------------- LOAD DATA -----------------------------------
+    # Data augmentation and normalization for training
+    # Just normalization for validation
+    data_transforms = {
+        'train': transforms.Compose([
+            transforms.RandomResizedCrop(input_size),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ]),
+        'val': transforms.Compose([
+            transforms.Resize(input_size),
+            transforms.CenterCrop(input_size),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ]),
+    }
+
+    print("Initializing Datasets and Dataloaders...")
+
+    # Create training and validation datasets
+    # image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x]) for x in ['train', 'val']}
+    # # Create training and validation dataloaders
+    # dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=4) for x in ['train', 'val']}
+
+    dataloaders_dict = {x: dataloader for x in ['train', 'val']}
+    
+
+    
+
+
+    #----------------------------------- OPTIMIZER -----------------------------------
+    # Send the model to GPU
+    model_ft = model_ft.to(device)
+
+    # Gather the parameters to be optimized/updated in this run. If we are
+    #  finetuning we will be updating all parameters. However, if we are
+    #  doing feature extract method, we will only update the parameters
+    #  that we have just initialized, i.e. the parameters with requires_grad
+    #  is True.
+    params_to_update = model_ft.parameters()
+    print("Params to learn:")
+    if feature_extract:
+        params_to_update = []
+        for name,param in model_ft.named_parameters():
+            if param.requires_grad == True:
+                params_to_update.append(param)
+                print("\t",name)
+    else:
+        for name,param in model_ft.named_parameters():
+            if param.requires_grad == True:
+                print("\t",name)
+
+    # Observe that all parameters are being optimized
+    optimizer_ft = optim.SGD(params_to_update, lr=0.001, momentum=0.9)
+
+    # Setup the loss fxn
+    criterion = nn.CrossEntropyLoss()
+
+    # Train and evaluate
+    model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=num_epochs, is_inception=(model_name=="inception"))
+
+    # Initialize the non-pretrained version of the model used for this run
+    scratch_model,_ = initialize_model(model_name, num_classes, feature_extract=False, use_pretrained=False)
+    scratch_model = scratch_model.to(device)
+    scratch_optimizer = optim.SGD(scratch_model.parameters(), lr=0.001, momentum=0.9)
+    scratch_criterion = nn.CrossEntropyLoss()
+    _,scratch_hist = train_model(scratch_model, dataloaders_dict, scratch_criterion, scratch_optimizer, num_epochs=num_epochs, is_inception=(model_name=="inception"))
+
+    # Plot the training curves of validation accuracy vs. number
+    #  of training epochs for the transfer learning method and
+    #  the model trained from scratch
+    ohist = []
+    shist = []
+
+    ohist = [h.cpu().numpy() for h in hist]
+    shist = [h.cpu().numpy() for h in scratch_hist]
+
+    plt.title("Validation Accuracy vs. Number of Training Epochs")
+    plt.xlabel("Training Epochs")
+    plt.ylabel("Validation Accuracy")
+    plt.plot(range(1,num_epochs+1),ohist,label="Pretrained")
+    plt.plot(range(1,num_epochs+1),shist,label="Scratch")
+    plt.ylim((0,1.))
+    plt.xticks(np.arange(1, num_epochs+1, 1.0))
+    plt.legend()
+    plt.show()
+
+if __name__ == '__main__':
+    psr = ArgumentParser()
+    psr.add_argument("--dataset", type=str, choices=['mnist'], default='mnist')
+    psr.add_argument("--corr", type=float, default=0.7)
+    psr.add_argument("--tol", type=float, default=0.1)
+    psr.add_argument("--seed", type=int, default=42)
+    args = psr.parse_args()
+
+    if args.dataset == 'mnist':
+
+        dataset = datasets.CorrelatedMNIST(
+                spurious_match_prob=args.corr,
+                seed=args.seed,
+            )
+        dataloader = DataLoader(dataset, batch_size=1000)
+
+        tutorialNonFunctionCode(dataloader)
