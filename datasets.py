@@ -139,6 +139,7 @@ class CorrelatedMNIST(Dataset):
 
     def __getitem__(self, idx):
         X = self.images[idx].unsqueeze(0)
+        X = X.repeat([3, 1, 1])
         y = self.labels[idx]
         """
             Randomly draw domain:
