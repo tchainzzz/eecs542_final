@@ -16,6 +16,8 @@ import torchvision
 from torchvision import models, transforms
 from utils import parse_argdict
 
+# Logging
+import wandb
 
 #note: originally designed for resnet but should work on anything that can use sequential (for first iteration of this implementation)
 class TwoHeadResNet(torch.nn.Module):
@@ -48,6 +50,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False, limit_batches=-1):
     since = time.time()
+    print(len(dataloaders['train']), len(dataloaders['val']))
 
     val_acc_history = []
 
@@ -55,9 +58,10 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
     best_acc_class = 0.0
 
     for epoch in range(num_epochs):
-
+        
         # Each epoch has a training and validation phase
         for phase in ['train', 'val']:
+            print("Starting ", phase, " phase")
             if phase == 'train':
                 model.train()  # Set model to training mode
             else:
@@ -129,6 +133,13 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                     "f1": f1_score(all_y.detach().numpy(), all_preds.detach().numpy()),
                     "auc": roc_auc_score(all_y.detach().numpy(), all_scores.detach().numpy())
                 })
+                
+                # Logging: 
+                wandb.log({phase+'_loss_classification_step':loss_class.item(), phase+'_loss_domain_step':loss_domain.item(), 
+                           phase+'_accuracy_classification_step':accuracy_score(labels.detach().numpy(),preds_class.detach().numpy()), phase+'_accuracy_domain_step':accuracy_score(labels.detach().numpy(),preds_class.detach().numpy()),
+                           phase+'_f1_classification_step':f1_score(labels.detach().numpy(), preds_class.detach().numpy()), phase+'_f1_domain_step':f1_score(labels.detach().numpy(), preds_class.detach().numpy()),
+                           phase+'_auc_classification_step': roc_auc_score(labels.detach().numpy(), preds_class.detach().numpy()), phase+'_auc_domain_step': roc_auc_score(labels.detach().numpy(), preds_class.detach().numpy())})
+                    
                 # TODO: CALCULATE METRICS FOR AUX_OUTPUTS AS WELL
 
             epoch_loss_class = running_loss_class / len(dataloaders[phase].dataset)
@@ -142,9 +153,18 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             epoch_auc_domain = roc_auc_score(all_domains.detach().numpy(), all_domain_scores.detach().numpy())
 
             # TODO: SAVE THESE
+    
+            wandb.log({phase+'_loss_classification_epoch':epoch_loss_class, phase+'_loss_domain_epoch':epoch_loss_domain, 
+                       phase+'_accuracy_classification_epoch':epoch_acc_class, phase+'_accuracy_domain_epoch':epoch_acc_domain,
+                       phase+'_f1_classification_epoch':epoch_f1_class, phase+'_f1_domain_epoch':epoch_f1_domain,
+                       phase+'_auc_classification_epoch': epoch_auc_class, phase+'_auc_domain_epoch':epoch_auc_domain})    
+            
 
             print('{} C-Loss: {:.4f} C-Acc: {:.4f} C-F1: {:.4f} C-AUC: {:.4f}'.format(phase, epoch_loss_class, epoch_acc_class, epoch_f1_class, epoch_auc_class))
             print('{} D-Loss: {:.4f} D-Acc: {:.4f} D-F1: {:.4f} D-AUC: {:.4f}'.format(phase, epoch_loss_domain, epoch_acc_domain, epoch_f1_domain, epoch_auc_domain))
+            
+            
+            
             # deep copy the model
             if phase == 'val' and epoch_acc_class > best_acc_class:
                 best_acc_class = epoch_acc_class
@@ -255,6 +275,8 @@ def train_eval_model(
     print("PyTorch Version: ", torch.__version__)
     print("Torchvision Version: ", torchvision.__version__)
 
+    
+    
     # Top level data directory. Here we assume the format of the directory conforms
     #   to the ImageFolder structure
     data_dir = "./data/"
@@ -350,18 +372,28 @@ if __name__ == '__main__':
     psr.add_argument("--dataset", type=str, choices=['mnist'], default='mnist')
     psr.add_argument("--corr", type=float, default=0.7)
     psr.add_argument("--seed", type=int, default=42)
+    psr.add_argument("--wandb_expt_name", type=str, default="test")
 
-    psr.add_argument("--num-workers", default=os.cpu_count(), type=int)
-    psr.add_argument("--model-name", type=str, required=True)
-    psr.add_argument("--batch-size", default=16, type=int)
-    psr.add_argument("--n-epochs", default=50, type=int)
-    psr.add_argument("--opt-name", default="SGD", type=str)
+    psr.add_argument("--num_workers", default=os.cpu_count(), type=int)
+    psr.add_argument("--model_name", type=str, required=True)
+    psr.add_argument("--batch_size", default=17, type=int)
+    psr.add_argument("--n-epochs", default=5, type=int)
+    psr.add_argument("--opt_name", default="SGD", type=str)
     psr.add_argument("--lr", type=float, required=True)
     psr.add_argument("--opt-kwargs", type=str, nargs='+', default={})
-    psr.add_argument("--limit-batches", type=int, default=-1)
+    psr.add_argument("--limit_batches", type=int, default=-1)
 
     args = psr.parse_args()
-
+    
+    metadata = {
+      "dataset": args.dataset,
+      "model": args.model_name,
+      "learning_rate": args.lr,
+      "batch_size": args.batch_size,
+    }
+    
+    wandb.init(project="eecs542", entity="eecs542", config=metadata)
+    wandb.run.name = args.wandb_expt_name
     if args.dataset == 'mnist':
 
         dataset = datasets.CorrelatedMNIST(
