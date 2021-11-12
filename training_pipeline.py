@@ -334,31 +334,31 @@ def tutorialNonFunctionCode(dataloader, dataName):
     # Train and evaluate
     model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=num_epochs, is_inception=(model_name=="inception"))
 
-    # Initialize the non-pretrained version of the model used for this run
-    scratch_model,_ = initialize_model(model_name, num_classes, feature_extract=False, use_pretrained=False)
-    scratch_model = scratch_model.to(device)
-    scratch_optimizer = optim.SGD(scratch_model.parameters(), lr=0.001, momentum=0.9)
-    scratch_criterion = nn.CrossEntropyLoss()
-    _,scratch_hist = train_model(scratch_model, dataloaders_dict, scratch_criterion, scratch_optimizer, num_epochs=num_epochs, is_inception=(model_name=="inception"))
+    # # Initialize the non-pretrained version of the model used for this run
+    # scratch_model,_ = initialize_model(model_name, num_classes, feature_extract=False, use_pretrained=False)
+    # scratch_model = scratch_model.to(device)
+    # scratch_optimizer = optim.SGD(scratch_model.parameters(), lr=0.001, momentum=0.9)
+    # scratch_criterion = nn.CrossEntropyLoss()
+    # _,scratch_hist = train_model(scratch_model, dataloaders_dict, scratch_criterion, scratch_optimizer, num_epochs=num_epochs, is_inception=(model_name=="inception"))
 
-    # Plot the training curves of validation accuracy vs. number
-    #  of training epochs for the transfer learning method and
-    #  the model trained from scratch
-    ohist = []
-    shist = []
+    # # Plot the training curves of validation accuracy vs. number
+    # #  of training epochs for the transfer learning method and
+    # #  the model trained from scratch
+    # ohist = []
+    # shist = []
 
-    ohist = [h.cpu().numpy() for h in hist]
-    shist = [h.cpu().numpy() for h in scratch_hist]
+    # ohist = [h.cpu().numpy() for h in hist]
+    # shist = [h.cpu().numpy() for h in scratch_hist]
 
-    plt.title("Validation Accuracy vs. Number of Training Epochs")
-    plt.xlabel("Training Epochs")
-    plt.ylabel("Validation Accuracy")
-    plt.plot(range(1,num_epochs+1),ohist,label="Pretrained")
-    plt.plot(range(1,num_epochs+1),shist,label="Scratch")
-    plt.ylim((0,1.))
-    plt.xticks(np.arange(1, num_epochs+1, 1.0))
-    plt.legend()
-    plt.show()
+    # plt.title("Validation Accuracy vs. Number of Training Epochs")
+    # plt.xlabel("Training Epochs")
+    # plt.ylabel("Validation Accuracy")
+    # plt.plot(range(1,num_epochs+1),ohist,label="Pretrained")
+    # plt.plot(range(1,num_epochs+1),shist,label="Scratch")
+    # plt.ylim((0,1.))
+    # plt.xticks(np.arange(1, num_epochs+1, 1.0))
+    # plt.legend()
+    # plt.show()
 
 if __name__ == '__main__':
     psr = ArgumentParser()
