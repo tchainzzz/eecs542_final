@@ -10,10 +10,12 @@ import matplotlib.pyplot as plt
 import time
 import os
 import copy
-
+ 
 import datasets
 from argparse import ArgumentParser
 from torch.utils.data import Dataset, DataLoader
+from tqdm.auto import tqdm
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
 # Batch size for training (change depending on how much memory you have)
 batch_size = 8
@@ -30,8 +32,6 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
     best_acc = 0.0
 
     for epoch in range(num_epochs):
-        print('Epoch {}/{}'.format(epoch, num_epochs - 1))
-        print('-' * 10)
 
         # Each epoch has a training and validation phase
         for phase in ['train', 'val']:
@@ -41,15 +41,14 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                 model.eval()   # Set model to evaluate mode
 
             running_loss = 0.0
-            running_corrects = 0
-
-
-            index = 0
             # Iterate over data.
-            for inputs, labels, domains in dataloaders[phase]:
+            all_y = torch.Tensor()
+            all_scores = torch.Tensor()
+            all_preds = torch.Tensor()
 
-                index += 1
-                print("batch: " + str(index) + "/" + str(len(dataloaders[phase])))
+            pbar = tqdm(dataloaders[phase], total=len(dataloaders[phase]))
+            for inputs, labels, domains in pbar:
+                pbar.set_description(f"{phase.upper()} - Epoch {epoch+1} / {num_epochs}")
                 inputs = inputs.to(device)
                 labels = labels.to(device)
 
@@ -73,21 +72,34 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                         outputs = model(inputs)
                         loss = criterion(outputs, labels)
 
-                    _, preds = torch.max(outputs, 1)
+                    scores, preds = torch.max(outputs, 1)
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
                         loss.backward()
                         optimizer.step()
 
+                all_y = torch.cat((all_y, labels))
+                all_preds = torch.cat((all_preds, preds))
+                all_scores = torch.cat((all_scores, scores))
+
                 # statistics
                 running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.data)
+                pbar.set_postfix({
+                    "loss": running_loss / all_y.size(0),
+                    "acc": accuracy_score(all_y.detach().numpy(), all_preds.detach().numpy()),
+                    "f1": f1_score(all_y.detach().numpy(), all_preds.detach().numpy()),
+                    "auc": roc_auc_score(all_y.detach().numpy(), all_scores.detach().numpy())
+                })
+                # TODO: CALCULATE METRICS FOR AUX_OUTPUTS AS WELL
 
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
-            epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
+            epoch_acc = accuracy_score(all_y.detach().numpy(), all_preds.detach().numpy())
+            epoch_f1 = f1_score(all_y.detach().numpy(), all_preds.detach().numpy())
+            epoch_auc = roc_auc_score(all_y.detach().numpy(), all_scores.detach().numpy())
+            # TODO: SAVE THESE
 
-            print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
+            print('{} Loss: {:.4f} Acc: {:.4f} F1: {:.4f} AUC: {:.4f}'.format(phase, epoch_loss, epoch_acc, epoch_f1, epoch_auc))
 
             # deep copy the model
             if phase == 'val' and epoch_acc > best_acc:
@@ -319,6 +331,6 @@ if __name__ == '__main__':
                 spurious_match_prob=args.corr,
                 seed=args.seed,
             )
-        dataloader = DataLoader(dataset, batch_size=1000)
+        dataloader = DataLoader(dataset, batch_size=64)
 
         tutorialNonFunctionCode(dataloader)
