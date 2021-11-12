@@ -1,29 +1,25 @@
-from __future__ import print_function
-from __future__ import division
+from __future__ import division, print_function
+
+import copy
+import os
+import time
+from argparse import ArgumentParser
+
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import numpy as np
-import torchvision
-from torchvision import datasets, models, transforms
-import matplotlib.pyplot as plt
-import time
-import os
-import copy
- 
-import datasets
-from argparse import ArgumentParser
-from torch.utils.data import Dataset, DataLoader
-from tqdm.auto import tqdm
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
-# Batch size for training (change depending on how much memory you have)
-batch_size = 8
+import datasets
+import torchvision
+from torchvision import models, transforms
+from utils import parse_argdict
 
 # Detect if we have a GPU available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False):
+def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False, limit_batches=-1):
     since = time.time()
 
     val_acc_history = []
@@ -46,9 +42,10 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             all_scores = torch.Tensor()
             all_preds = torch.Tensor()
 
-            pbar = tqdm(dataloaders[phase], total=len(dataloaders[phase]))
-            for inputs, labels, domains in pbar:
-                pbar.set_description(f"{phase.upper()} - Epoch {epoch+1} / {num_epochs}")
+            pbar = tqdm(enumerate(dataloaders[phase]), total=len(dataloaders[phase]))
+            pbar.set_description(f"{phase.upper()} - Epoch {epoch+1} / {num_epochs}")
+            for i, (inputs, labels, domains) in pbar:
+                if i == limit_batches: break
                 inputs = inputs.to(device)
                 labels = labels.to(device)
 
@@ -118,6 +115,8 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
     model.load_state_dict(best_model_wts)
     return model, val_acc_history
 
+def build_optimizer(opt_name, model, **kwargs):
+    return getattr(torch.optim, opt_name)(model.parameters(), **kwargs)
 
 def set_parameter_requires_grad(model, feature_extracting):
     if feature_extracting:
@@ -145,7 +144,7 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         model_ft = models.alexnet(pretrained=use_pretrained)
         set_parameter_requires_grad(model_ft, feature_extract)
         num_ftrs = model_ft.classifier[6].in_features
-        model_ft.classifier[6] = nn.Linear(num_ftrs,num_classes)
+        model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
         input_size = 224
 
     elif model_name == "vgg":
@@ -154,7 +153,7 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         model_ft = models.vgg11_bn(pretrained=use_pretrained)
         set_parameter_requires_grad(model_ft, feature_extract)
         num_ftrs = model_ft.classifier[6].in_features
-        model_ft.classifier[6] = nn.Linear(num_ftrs,num_classes)
+        model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
         input_size = 224
 
     elif model_name == "squeezenet":
@@ -162,7 +161,7 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         """
         model_ft = models.squeezenet1_0(pretrained=use_pretrained)
         set_parameter_requires_grad(model_ft, feature_extract)
-        model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1,1), stride=(1,1))
+        model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1, 1), stride=(1, 1))
         model_ft.num_classes = num_classes
         input_size = 224
 
@@ -186,7 +185,7 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         model_ft.AuxLogits.fc = nn.Linear(num_ftrs, num_classes)
         # Handle the primary net
         num_ftrs = model_ft.fc.in_features
-        model_ft.fc = nn.Linear(num_ftrs,num_classes)
+        model_ft.fc = nn.Linear(num_ftrs, num_classes)
         input_size = 299
 
     else:
@@ -196,26 +195,25 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
     return model_ft, input_size
 
 
-
-def tutorialNonFunctionCode(dataloader):
-    print("PyTorch Version: ",torch.__version__)
-    print("Torchvision Version: ",torchvision.__version__)
+def train_eval_model(
+        dataloader,
+        model_name,  # [resnet, alexnet, vgg, squeezenet, densenet, inception]
+        n_epochs,
+        opt_name,
+        lr,
+        opt_kwargs,
+        limit_batches=-1,
+):
+    print("PyTorch Version: ", torch.__version__)
+    print("Torchvision Version: ", torchvision.__version__)
 
 
     # Top level data directory. Here we assume the format of the directory conforms
     #   to the ImageFolder structure
     data_dir = "./data/"
 
-    # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception]
-    model_name = "resnet"
-
     # Number of classes in the dataset
     num_classes = 2
-
-    
-
-    # Number of epochs to train for
-    num_epochs = 15
 
     # Flag for feature extracting. When False, we finetune the whole model,
     #   when True we only update the reshaped layer params
@@ -226,8 +224,6 @@ def tutorialNonFunctionCode(dataloader):
 
     # Print the model we just instantiated
     print(model_ft)
-
-
 
     #----------------------------------- LOAD DATA -----------------------------------
     # Data augmentation and normalization for training
@@ -255,9 +251,6 @@ def tutorialNonFunctionCode(dataloader):
     # dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=4) for x in ['train', 'val']}
 
     dataloaders_dict = {x: dataloader for x in ['train', 'val']}
-    
-
-    
 
 
     #----------------------------------- OPTIMIZER -----------------------------------
@@ -273,56 +266,53 @@ def tutorialNonFunctionCode(dataloader):
     print("Params to learn:")
     if feature_extract:
         params_to_update = []
-        for name,param in model_ft.named_parameters():
-            if param.requires_grad == True:
+        for name, param in model_ft.named_parameters():
+            if param.requires_grad:
                 params_to_update.append(param)
-                print("\t",name)
+                print("\t", name)
     else:
-        for name,param in model_ft.named_parameters():
-            if param.requires_grad == True:
-                print("\t",name)
+        for name, param in model_ft.named_parameters():
+            if param.requires_grad:
+                print("\t", name)
 
     # Observe that all parameters are being optimized
-    optimizer_ft = optim.SGD(params_to_update, lr=0.001, momentum=0.9)
+    # optimizer_ft = optim.SGD(params_to_update, lr=0.001, momentum=0.9)
+    optimizer_ft = build_optimizer(opt_name, model_ft, lr=lr, **opt_kwargs)
+
+    # THESE TWO ARE THE RIGHT SETTINGS FOR IWILDCAM AND CAMELYON -- CAN'T REMEMBER WHICH IS WHICH
+    # optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=0.01)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=3e-5)
 
     # Setup the loss fxn
     criterion = nn.CrossEntropyLoss()
 
     # Train and evaluate
-    model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=num_epochs, is_inception=(model_name=="inception"))
+    model_ft, hist = train_model(
+            model_ft,
+            dataloaders_dict,
+            criterion,
+            optimizer_ft,
+            num_epochs=n_epochs,
+            is_inception=(model_name == "inception"),
+            limit_batches=limit_batches,
+        )
 
-    # Initialize the non-pretrained version of the model used for this run
-    scratch_model,_ = initialize_model(model_name, num_classes, feature_extract=False, use_pretrained=False)
-    scratch_model = scratch_model.to(device)
-    scratch_optimizer = optim.SGD(scratch_model.parameters(), lr=0.001, momentum=0.9)
-    scratch_criterion = nn.CrossEntropyLoss()
-    _,scratch_hist = train_model(scratch_model, dataloaders_dict, scratch_criterion, scratch_optimizer, num_epochs=num_epochs, is_inception=(model_name=="inception"))
-
-    # Plot the training curves of validation accuracy vs. number
-    #  of training epochs for the transfer learning method and
-    #  the model trained from scratch
-    ohist = []
-    shist = []
-
-    ohist = [h.cpu().numpy() for h in hist]
-    shist = [h.cpu().numpy() for h in scratch_hist]
-
-    plt.title("Validation Accuracy vs. Number of Training Epochs")
-    plt.xlabel("Training Epochs")
-    plt.ylabel("Validation Accuracy")
-    plt.plot(range(1,num_epochs+1),ohist,label="Pretrained")
-    plt.plot(range(1,num_epochs+1),shist,label="Scratch")
-    plt.ylim((0,1.))
-    plt.xticks(np.arange(1, num_epochs+1, 1.0))
-    plt.legend()
-    plt.show()
 
 if __name__ == '__main__':
     psr = ArgumentParser()
     psr.add_argument("--dataset", type=str, choices=['mnist'], default='mnist')
     psr.add_argument("--corr", type=float, default=0.7)
-    psr.add_argument("--tol", type=float, default=0.1)
     psr.add_argument("--seed", type=int, default=42)
+
+    psr.add_argument("--num-workers", default=os.cpu_count(), type=int)
+    psr.add_argument("--model-name", type=str, required=True)
+    psr.add_argument("--batch-size", default=16, type=int)
+    psr.add_argument("--n-epochs", default=50, type=int)
+    psr.add_argument("--opt-name", default="SGD", type=str)
+    psr.add_argument("--lr", type=float, required=True)
+    psr.add_argument("--opt-kwargs", type=str, nargs='+', default={})
+    psr.add_argument("--limit-batches", type=int, default=-1)
+
     args = psr.parse_args()
 
     if args.dataset == 'mnist':
@@ -331,6 +321,14 @@ if __name__ == '__main__':
                 spurious_match_prob=args.corr,
                 seed=args.seed,
             )
-        dataloader = DataLoader(dataset, batch_size=64)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size) # TODO: need to separately define train + eval for each expeirment
 
-        tutorialNonFunctionCode(dataloader)
+        train_eval_model(
+            dataloader,
+            args.model_name,
+            args.n_epochs,
+            args.opt_name,
+            args.lr,
+            parse_argdict(args.opt_kwargs),
+            args.limit_batches,
+        )
