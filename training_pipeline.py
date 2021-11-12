@@ -10,10 +10,41 @@ import matplotlib.pyplot as plt
 import time
 import os
 import copy
+import torch.nn.functional as F
 
 import datasets
 from argparse import ArgumentParser
 from torch.utils.data import Dataset, DataLoader
+
+#note: originally designed for resnet but should work on anything that can use sequential (for first iteration of this implementation)
+class TwoHeadResNet(torch.nn.Module):
+    def __init__(self, resnetModel):
+        """
+        In the constructor we instantiate two nn.Linear modules and assign them as
+        member variables.
+        """
+        super(TwoHeadResNet, self).__init__()
+        self.resnetBackbone = torch.nn.Sequential(*(list(resnetModel.children())[:-1]))
+
+        linearInputSize = 512 # from resnet source code and empirical observation/hardcoded value for now
+        self.classHead = torch.nn.Linear(linearInputSize, 1)
+        self.domainHead = torch.nn.Linear(linearInputSize, 1)
+
+    def forward(self, x):
+        """
+        In the forward function we accept a Tensor of input data and we must return
+        a Tensor of output data. We can use Modules defined in the constructor as
+        well as arbitrary operators on Tensors.
+        """
+        backboneOut = self.resnetBackbone(x)
+        backboneOut = backboneOut.view(-1, 512 * 1 * 1)
+        classOut = self.classHead(backboneOut)
+        domainOut = self.domainHead(backboneOut)
+        classOut = F.log_softmax(classOut, dim=1)
+        domainOut = F.log_softmax(domainOut, dim=1)
+        return (classOut, domainOut)
+
+
 
 # Batch size for training (change depending on how much memory you have)
 batch_size = 8
@@ -27,7 +58,7 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
     val_acc_history = []
 
     best_model_wts = copy.deepcopy(model.state_dict())
-    best_acc = 0.0
+    best_acc_class = 0.0
 
     for epoch in range(num_epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
@@ -40,8 +71,10 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             else:
                 model.eval()   # Set model to evaluate mode
 
-            running_loss = 0.0
-            running_corrects = 0
+            running_loss_class = 0.0
+            running_loss_domain = 0.0
+            running_corrects_class = 0
+            running_corrects_domain = 0
 
 
             index = 0
@@ -50,8 +83,16 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
 
                 index += 1
                 print("batch: " + str(index) + "/" + str(len(dataloaders[phase])))
+
+
                 inputs = inputs.to(device)
                 labels = labels.to(device)
+                domains = domains.to(device)
+
+                labels = labels.view(-1, 1)
+                labels = labels.to(torch.float32)
+                domains = domains.view(-1, 1)
+                domains = domains.to(torch.float32)
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
@@ -70,37 +111,44 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                         loss2 = criterion(aux_outputs, labels)
                         loss = loss1 + 0.4*loss2
                     else:
-                        outputs = model(inputs)
-                        loss = criterion(outputs, labels)
+                        outputsClass, outputsDomain = model(inputs)
+                        lossClass = criterion(outputsClass, labels)
+                        lossDomain = criterion(outputsDomain, domains)
 
-                    _, preds = torch.max(outputs, 1)
+                    _, predsClass = torch.max(outputsClass, 1)
+                    _, predsDomain = torch.max(outputsDomain, 1)
 
                     # backward + optimize only if in training phase
                     if phase == 'train':
-                        loss.backward()
+                        lossClass.backward()
+                        lossDomain.backward()
                         optimizer.step()
 
                 # statistics
-                running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.data)
+                running_loss_class += lossClass.item() * inputs.size(0)
+                running_loss_domain += lossDomain.item() * inputs.size(0)
+                running_corrects_class += torch.sum(predsClass == labels.data)
+                running_corrects_domain += torch.sum(predsDomain == domains.data)
 
-            epoch_loss = running_loss / len(dataloaders[phase].dataset)
-            epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
+            epoch_loss_class = running_loss_class / len(dataloaders[phase].dataset)
+            epoch_loss_domain = running_loss_domain / len(dataloaders[phase].dataset)
+            epoch_acc_class = running_corrects_class.double() / len(dataloaders[phase].dataset)
+            epoch_acc_domain = running_corrects_domain.double() / len(dataloaders[phase].dataset)
 
-            print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
+            print('{} Loss Class: {:.4f} Loss Domain: {:.4f} Acc Class: {:.4f} Acc Domain: {:.4f}'.format(phase, epoch_loss_class, epoch_loss_domain, epoch_acc_class, epoch_acc_domain))
 
             # deep copy the model
-            if phase == 'val' and epoch_acc > best_acc:
-                best_acc = epoch_acc
+            if phase == 'val' and epoch_acc_class > best_acc_class:
+                best_acc_class = epoch_acc_class
                 best_model_wts = copy.deepcopy(model.state_dict())
             if phase == 'val':
-                val_acc_history.append(epoch_acc)
+                val_acc_history.append(epoch_acc_class)
 
         print()
 
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-    print('Best val Acc: {:4f}'.format(best_acc))
+    print('Best val Acc Class: {:4f}'.format(best_acc_class))
 
     # load best model weights
     model.load_state_dict(best_model_wts)
@@ -181,11 +229,14 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         print("Invalid model name, exiting...")
         exit()
 
-    return model_ft, input_size
+
+    model_ft_2head = TwoHeadResNet(model_ft)
+
+    return model_ft_2head, input_size
 
 
 
-def tutorialNonFunctionCode(dataloader):
+def tutorialNonFunctionCode(dataloader, dataName):
     print("PyTorch Version: ",torch.__version__)
     print("Torchvision Version: ",torchvision.__version__)
 
@@ -274,7 +325,11 @@ def tutorialNonFunctionCode(dataloader):
     optimizer_ft = optim.SGD(params_to_update, lr=0.001, momentum=0.9)
 
     # Setup the loss fxn
-    criterion = nn.CrossEntropyLoss()
+    if dataName == "mnist":
+        #For MNIST, the labels are binary
+        criterion = nn.BCELoss()
+    else:
+        criterion = nn.CrossEntropyLoss()
 
     # Train and evaluate
     model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=num_epochs, is_inception=(model_name=="inception"))
@@ -321,4 +376,4 @@ if __name__ == '__main__':
             )
         dataloader = DataLoader(dataset, batch_size=1000)
 
-        tutorialNonFunctionCode(dataloader)
+        tutorialNonFunctionCode(dataloader, args.dataset)
