@@ -16,6 +16,33 @@ import torchvision
 from torchvision import models, transforms
 from utils import parse_argdict
 
+
+#note: originally designed for resnet but should work on anything that can use sequential (for first iteration of this implementation)
+class TwoHeadResNet(torch.nn.Module):
+    def __init__(self, resnetModel):
+        """
+        In the constructor we instantiate two nn.Linear modules and assign them as
+        member variables.
+        """
+        super(TwoHeadResNet, self).__init__()
+        self.l_input_size = resnetModel.fc.in_features
+        self.resnetBackbone = torch.nn.Sequential(*(list(resnetModel.children())[:-1]))
+
+        self.classHead = torch.nn.Linear(self.l_input_size, 1)
+        self.domainHead = torch.nn.Linear(self.l_input_size, 1)
+
+    def forward(self, x):
+        """
+        In the forward function we accept a Tensor of input data and we must return
+        a Tensor of output data. We can use Modules defined in the constructor as
+        well as arbitrary operators on Tensors.
+        """
+        backboneOut = self.resnetBackbone(x)
+        backboneOut = backboneOut.view(-1, self.l_input_size)
+        classOut = self.classHead(backboneOut)
+        domainOut = self.domainHead(backboneOut)
+        return torch.sigmoid(classOut), torch.sigmoid(domainOut)
+
 # Detect if we have a GPU available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -25,7 +52,7 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
     val_acc_history = []
 
     best_model_wts = copy.deepcopy(model.state_dict())
-    best_acc = 0.0
+    best_acc_class = 0.0
 
     for epoch in range(num_epochs):
 
@@ -36,18 +63,35 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             else:
                 model.eval()   # Set model to evaluate mode
 
-            running_loss = 0.0
-            # Iterate over data.
+            # initialize metric-storing structures
+            running_loss_class = 0.0
+            running_loss_domain = 0.0
+
             all_y = torch.Tensor()
             all_scores = torch.Tensor()
             all_preds = torch.Tensor()
 
+            all_domains = torch.Tensor()
+            all_domain_scores = torch.Tensor()
+            all_domain_preds = torch.Tensor()
+
+            # create progress bar
             pbar = tqdm(enumerate(dataloaders[phase]), total=len(dataloaders[phase]))
             pbar.set_description(f"{phase.upper()} - Epoch {epoch+1} / {num_epochs}")
             for i, (inputs, labels, domains) in pbar:
-                if i == limit_batches: break
+                # iterate through data -- batch optimization
+                if i == limit_batches:
+                    break
+
+                # move data to correct devices/shape as needed
                 inputs = inputs.to(device)
                 labels = labels.to(device)
+                domains = domains.to(device)
+
+                labels = labels.view(-1, 1)
+                labels = labels.to(torch.float32)
+                domains = domains.view(-1, 1)
+                domains = domains.to(torch.float32)
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
@@ -56,60 +100,63 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
                     # Get model outputs and calculate loss
-                    # Special case for inception because in training it has an auxiliary output. In train
-                    #   mode we calculate the loss by summing the final output and the auxiliary output
-                    #   but in testing we only consider the final output.
-                    if is_inception and phase == 'train':
-                        # From https://discuss.pytorch.org/t/how-to-optimize-inception-model-with-auxiliary-classifiers/7958
-                        outputs, aux_outputs = model(inputs)
-                        loss1 = criterion(outputs, labels)
-                        loss2 = criterion(aux_outputs, labels)
-                        loss = loss1 + 0.4*loss2
-                    else:
-                        outputs = model(inputs)
-                        loss = criterion(outputs, labels)
+                    scores_class, scores_domain = model(inputs) # list of probabilities with shape (1, batch_size)
+                    loss_class = criterion(scores_class, labels)
+                    loss_domain = criterion(scores_domain, domains)
 
-                    scores, preds = torch.max(outputs, 1)
-
+                    preds_class = torch.where(scores_class < 0.5, 0, 1)
+                    preds_domain = torch.where(scores_domain < 0.5, 0, 1)
                     # backward + optimize only if in training phase
                     if phase == 'train':
-                        loss.backward()
+                        loss_class.backward()
+                        loss_domain.backward()
                         optimizer.step()
 
                 all_y = torch.cat((all_y, labels))
-                all_preds = torch.cat((all_preds, preds))
-                all_scores = torch.cat((all_scores, scores))
+                all_preds = torch.cat((all_preds, preds_class))
+                all_scores = torch.cat((all_scores, scores_class))
+
+                all_domains = torch.cat((all_domains, domains))
+                all_domain_preds = torch.cat((all_domain_preds, preds_domain))
+                all_domain_scores = torch.cat((all_domain_scores, scores_domain))
 
                 # statistics
-                running_loss += loss.item() * inputs.size(0)
+                running_loss_class += loss_class.item() * inputs.size(0)
+                running_loss_domain += loss_domain.item() * inputs.size(0)
                 pbar.set_postfix({
-                    "loss": running_loss / all_y.size(0),
+                    "loss": running_loss_class / all_y.size(0),
                     "acc": accuracy_score(all_y.detach().numpy(), all_preds.detach().numpy()),
                     "f1": f1_score(all_y.detach().numpy(), all_preds.detach().numpy()),
                     "auc": roc_auc_score(all_y.detach().numpy(), all_scores.detach().numpy())
                 })
                 # TODO: CALCULATE METRICS FOR AUX_OUTPUTS AS WELL
 
-            epoch_loss = running_loss / len(dataloaders[phase].dataset)
-            epoch_acc = accuracy_score(all_y.detach().numpy(), all_preds.detach().numpy())
-            epoch_f1 = f1_score(all_y.detach().numpy(), all_preds.detach().numpy())
-            epoch_auc = roc_auc_score(all_y.detach().numpy(), all_scores.detach().numpy())
+            epoch_loss_class = running_loss_class / len(dataloaders[phase].dataset)
+            epoch_acc_class = accuracy_score(all_y.detach().numpy(), all_preds.detach().numpy())
+            epoch_f1_class = f1_score(all_y.detach().numpy(), all_preds.detach().numpy())
+            epoch_auc_class = roc_auc_score(all_y.detach().numpy(), all_scores.detach().numpy())
+
+            epoch_loss_domain = running_loss_domain / len(dataloaders[phase].dataset)
+            epoch_acc_domain = accuracy_score(all_domains.detach().numpy(), all_domain_preds.detach().numpy())
+            epoch_f1_domain = f1_score(all_domains.detach().numpy(), all_domain_preds.detach().numpy())
+            epoch_auc_domain = roc_auc_score(all_domains.detach().numpy(), all_domain_scores.detach().numpy())
+
             # TODO: SAVE THESE
 
-            print('{} Loss: {:.4f} Acc: {:.4f} F1: {:.4f} AUC: {:.4f}'.format(phase, epoch_loss, epoch_acc, epoch_f1, epoch_auc))
-
+            print('{} C-Loss: {:.4f} C-Acc: {:.4f} C-F1: {:.4f} C-AUC: {:.4f}'.format(phase, epoch_loss_class, epoch_acc_class, epoch_f1_class, epoch_auc_class))
+            print('{} D-Loss: {:.4f} D-Acc: {:.4f} D-F1: {:.4f} D-AUC: {:.4f}'.format(phase, epoch_loss_domain, epoch_acc_domain, epoch_f1_domain, epoch_auc_domain))
             # deep copy the model
-            if phase == 'val' and epoch_acc > best_acc:
-                best_acc = epoch_acc
+            if phase == 'val' and epoch_acc_class > best_acc_class:
+                best_acc_class = epoch_acc_class
                 best_model_wts = copy.deepcopy(model.state_dict())
             if phase == 'val':
-                val_acc_history.append(epoch_acc)
+                val_acc_history.append(epoch_acc_class)
 
         print()
 
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-    print('Best val Acc: {:4f}'.format(best_acc))
+    print('Best val Acc Class: {:4f}'.format(best_acc_class))
 
     # load best model weights
     model.load_state_dict(best_model_wts)
@@ -192,8 +239,9 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         print("Invalid model name, exiting...")
         exit()
 
-    return model_ft, input_size
 
+    model_ft_2head = TwoHeadResNet(model_ft)
+    return model_ft_2head, input_size
 
 def train_eval_model(
         dataloader,
@@ -206,7 +254,6 @@ def train_eval_model(
 ):
     print("PyTorch Version: ", torch.__version__)
     print("Torchvision Version: ", torchvision.__version__)
-
 
     # Top level data directory. Here we assume the format of the directory conforms
     #   to the ImageFolder structure
@@ -284,7 +331,7 @@ def train_eval_model(
     # optimizer = torch.optim.Adam(model.parameters(), lr=3e-5)
 
     # Setup the loss fxn
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.BCELoss()
 
     # Train and evaluate
     model_ft, hist = train_model(
@@ -332,3 +379,4 @@ if __name__ == '__main__':
             parse_argdict(args.opt_kwargs),
             args.limit_batches,
         )
+
