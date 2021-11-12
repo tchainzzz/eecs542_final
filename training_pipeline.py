@@ -1,20 +1,21 @@
-from __future__ import print_function
-from __future__ import division
+from __future__ import division, print_function
+
+import copy
+import os
+import time
+from argparse import ArgumentParser
+
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import numpy as np
-import torchvision
-from torchvision import datasets, models, transforms
-import matplotlib.pyplot as plt
-import time
-import os
-import copy
-import torch.nn.functional as F
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
 import datasets
-from argparse import ArgumentParser
-from torch.utils.data import Dataset, DataLoader
+import torchvision
+from torchvision import models, transforms
+from utils import parse_argdict
+
 
 #note: originally designed for resnet but should work on anything that can use sequential (for first iteration of this implementation)
 class TwoHeadResNet(torch.nn.Module):
@@ -24,11 +25,11 @@ class TwoHeadResNet(torch.nn.Module):
         member variables.
         """
         super(TwoHeadResNet, self).__init__()
+        self.l_input_size = resnetModel.fc.in_features
         self.resnetBackbone = torch.nn.Sequential(*(list(resnetModel.children())[:-1]))
 
-        linearInputSize = 512 # from resnet source code and empirical observation/hardcoded value for now
-        self.classHead = torch.nn.Linear(linearInputSize, 1)
-        self.domainHead = torch.nn.Linear(linearInputSize, 1)
+        self.classHead = torch.nn.Linear(self.l_input_size, 1)
+        self.domainHead = torch.nn.Linear(self.l_input_size, 1)
 
     def forward(self, x):
         """
@@ -37,22 +38,15 @@ class TwoHeadResNet(torch.nn.Module):
         well as arbitrary operators on Tensors.
         """
         backboneOut = self.resnetBackbone(x)
-        backboneOut = backboneOut.view(-1, 512 * 1 * 1)
+        backboneOut = backboneOut.view(-1, self.l_input_size)
         classOut = self.classHead(backboneOut)
         domainOut = self.domainHead(backboneOut)
-        classOut = F.log_softmax(classOut, dim=1)
-        domainOut = F.log_softmax(domainOut, dim=1)
-        return (classOut, domainOut)
-
-
-
-# Batch size for training (change depending on how much memory you have)
-batch_size = 8
+        return torch.sigmoid(classOut), torch.sigmoid(domainOut)
 
 # Detect if we have a GPU available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False):
+def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False, limit_batches=-1):
     since = time.time()
 
     val_acc_history = []
@@ -61,8 +55,6 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
     best_acc_class = 0.0
 
     for epoch in range(num_epochs):
-        print('Epoch {}/{}'.format(epoch, num_epochs - 1))
-        print('-' * 10)
 
         # Each epoch has a training and validation phase
         for phase in ['train', 'val']:
@@ -71,20 +63,27 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             else:
                 model.eval()   # Set model to evaluate mode
 
+            # initialize metric-storing structures
             running_loss_class = 0.0
             running_loss_domain = 0.0
-            running_corrects_class = 0
-            running_corrects_domain = 0
 
+            all_y = torch.Tensor()
+            all_scores = torch.Tensor()
+            all_preds = torch.Tensor()
 
-            index = 0
-            # Iterate over data.
-            for inputs, labels, domains in dataloaders[phase]:
+            all_domains = torch.Tensor()
+            all_domain_scores = torch.Tensor()
+            all_domain_preds = torch.Tensor()
 
-                index += 1
-                print("batch: " + str(index) + "/" + str(len(dataloaders[phase])))
+            # create progress bar
+            pbar = tqdm(enumerate(dataloaders[phase]), total=len(dataloaders[phase]))
+            pbar.set_description(f"{phase.upper()} - Epoch {epoch+1} / {num_epochs}")
+            for i, (inputs, labels, domains) in pbar:
+                # iterate through data -- batch optimization
+                if i == limit_batches:
+                    break
 
-
+                # move data to correct devices/shape as needed
                 inputs = inputs.to(device)
                 labels = labels.to(device)
                 domains = domains.to(device)
@@ -101,42 +100,51 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                 # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
                     # Get model outputs and calculate loss
-                    # Special case for inception because in training it has an auxiliary output. In train
-                    #   mode we calculate the loss by summing the final output and the auxiliary output
-                    #   but in testing we only consider the final output.
-                    if is_inception and phase == 'train':
-                        # From https://discuss.pytorch.org/t/how-to-optimize-inception-model-with-auxiliary-classifiers/7958
-                        outputs, aux_outputs = model(inputs)
-                        loss1 = criterion(outputs, labels)
-                        loss2 = criterion(aux_outputs, labels)
-                        loss = loss1 + 0.4*loss2
-                    else:
-                        outputsClass, outputsDomain = model(inputs)
-                        lossClass = criterion(outputsClass, labels)
-                        lossDomain = criterion(outputsDomain, domains)
+                    scores_class, scores_domain = model(inputs) # list of probabilities with shape (1, batch_size)
+                    loss_class = criterion(scores_class, labels)
+                    loss_domain = criterion(scores_domain, domains)
 
-                    _, predsClass = torch.max(outputsClass, 1)
-                    _, predsDomain = torch.max(outputsDomain, 1)
-
+                    preds_class = torch.where(scores_class < 0.5, 0, 1)
+                    preds_domain = torch.where(scores_domain < 0.5, 0, 1)
                     # backward + optimize only if in training phase
                     if phase == 'train':
-                        lossClass.backward()
-                        lossDomain.backward()
+                        loss_class.backward()
+                        loss_domain.backward()
                         optimizer.step()
 
+                all_y = torch.cat((all_y, labels))
+                all_preds = torch.cat((all_preds, preds_class))
+                all_scores = torch.cat((all_scores, scores_class))
+
+                all_domains = torch.cat((all_domains, domains))
+                all_domain_preds = torch.cat((all_domain_preds, preds_domain))
+                all_domain_scores = torch.cat((all_domain_scores, scores_domain))
+
                 # statistics
-                running_loss_class += lossClass.item() * inputs.size(0)
-                running_loss_domain += lossDomain.item() * inputs.size(0)
-                running_corrects_class += torch.sum(predsClass == labels.data)
-                running_corrects_domain += torch.sum(predsDomain == domains.data)
+                running_loss_class += loss_class.item() * inputs.size(0)
+                running_loss_domain += loss_domain.item() * inputs.size(0)
+                pbar.set_postfix({
+                    "loss": running_loss_class / all_y.size(0),
+                    "acc": accuracy_score(all_y.detach().numpy(), all_preds.detach().numpy()),
+                    "f1": f1_score(all_y.detach().numpy(), all_preds.detach().numpy()),
+                    "auc": roc_auc_score(all_y.detach().numpy(), all_scores.detach().numpy())
+                })
+                # TODO: CALCULATE METRICS FOR AUX_OUTPUTS AS WELL
 
             epoch_loss_class = running_loss_class / len(dataloaders[phase].dataset)
+            epoch_acc_class = accuracy_score(all_y.detach().numpy(), all_preds.detach().numpy())
+            epoch_f1_class = f1_score(all_y.detach().numpy(), all_preds.detach().numpy())
+            epoch_auc_class = roc_auc_score(all_y.detach().numpy(), all_scores.detach().numpy())
+
             epoch_loss_domain = running_loss_domain / len(dataloaders[phase].dataset)
-            epoch_acc_class = running_corrects_class.double() / len(dataloaders[phase].dataset)
-            epoch_acc_domain = running_corrects_domain.double() / len(dataloaders[phase].dataset)
+            epoch_acc_domain = accuracy_score(all_domains.detach().numpy(), all_domain_preds.detach().numpy())
+            epoch_f1_domain = f1_score(all_domains.detach().numpy(), all_domain_preds.detach().numpy())
+            epoch_auc_domain = roc_auc_score(all_domains.detach().numpy(), all_domain_scores.detach().numpy())
 
-            print('{} Loss Class: {:.4f} Loss Domain: {:.4f} Acc Class: {:.4f} Acc Domain: {:.4f}'.format(phase, epoch_loss_class, epoch_loss_domain, epoch_acc_class, epoch_acc_domain))
+            # TODO: SAVE THESE
 
+            print('{} C-Loss: {:.4f} C-Acc: {:.4f} C-F1: {:.4f} C-AUC: {:.4f}'.format(phase, epoch_loss_class, epoch_acc_class, epoch_f1_class, epoch_auc_class))
+            print('{} D-Loss: {:.4f} D-Acc: {:.4f} D-F1: {:.4f} D-AUC: {:.4f}'.format(phase, epoch_loss_domain, epoch_acc_domain, epoch_f1_domain, epoch_auc_domain))
             # deep copy the model
             if phase == 'val' and epoch_acc_class > best_acc_class:
                 best_acc_class = epoch_acc_class
@@ -154,6 +162,8 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
     model.load_state_dict(best_model_wts)
     return model, val_acc_history
 
+def build_optimizer(opt_name, model, **kwargs):
+    return getattr(torch.optim, opt_name)(model.parameters(), **kwargs)
 
 def set_parameter_requires_grad(model, feature_extracting):
     if feature_extracting:
@@ -181,7 +191,7 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         model_ft = models.alexnet(pretrained=use_pretrained)
         set_parameter_requires_grad(model_ft, feature_extract)
         num_ftrs = model_ft.classifier[6].in_features
-        model_ft.classifier[6] = nn.Linear(num_ftrs,num_classes)
+        model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
         input_size = 224
 
     elif model_name == "vgg":
@@ -190,7 +200,7 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         model_ft = models.vgg11_bn(pretrained=use_pretrained)
         set_parameter_requires_grad(model_ft, feature_extract)
         num_ftrs = model_ft.classifier[6].in_features
-        model_ft.classifier[6] = nn.Linear(num_ftrs,num_classes)
+        model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
         input_size = 224
 
     elif model_name == "squeezenet":
@@ -198,7 +208,7 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         """
         model_ft = models.squeezenet1_0(pretrained=use_pretrained)
         set_parameter_requires_grad(model_ft, feature_extract)
-        model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1,1), stride=(1,1))
+        model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1, 1), stride=(1, 1))
         model_ft.num_classes = num_classes
         input_size = 224
 
@@ -222,7 +232,7 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         model_ft.AuxLogits.fc = nn.Linear(num_ftrs, num_classes)
         # Handle the primary net
         num_ftrs = model_ft.fc.in_features
-        model_ft.fc = nn.Linear(num_ftrs,num_classes)
+        model_ft.fc = nn.Linear(num_ftrs, num_classes)
         input_size = 299
 
     else:
@@ -231,30 +241,26 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
 
 
     model_ft_2head = TwoHeadResNet(model_ft)
-
     return model_ft_2head, input_size
 
-
-
-def tutorialNonFunctionCode(dataloader, dataName):
-    print("PyTorch Version: ",torch.__version__)
-    print("Torchvision Version: ",torchvision.__version__)
-
+def train_eval_model(
+        dataloader,
+        model_name,  # [resnet, alexnet, vgg, squeezenet, densenet, inception]
+        n_epochs,
+        opt_name,
+        lr,
+        opt_kwargs,
+        limit_batches=-1,
+):
+    print("PyTorch Version: ", torch.__version__)
+    print("Torchvision Version: ", torchvision.__version__)
 
     # Top level data directory. Here we assume the format of the directory conforms
     #   to the ImageFolder structure
     data_dir = "./data/"
 
-    # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception]
-    model_name = "resnet"
-
     # Number of classes in the dataset
     num_classes = 2
-
-    
-
-    # Number of epochs to train for
-    num_epochs = 15
 
     # Flag for feature extracting. When False, we finetune the whole model,
     #   when True we only update the reshaped layer params
@@ -265,8 +271,6 @@ def tutorialNonFunctionCode(dataloader, dataName):
 
     # Print the model we just instantiated
     print(model_ft)
-
-
 
     #----------------------------------- LOAD DATA -----------------------------------
     # Data augmentation and normalization for training
@@ -294,9 +298,6 @@ def tutorialNonFunctionCode(dataloader, dataName):
     # dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=4) for x in ['train', 'val']}
 
     dataloaders_dict = {x: dataloader for x in ['train', 'val']}
-    
-
-    
 
 
     #----------------------------------- OPTIMIZER -----------------------------------
@@ -312,60 +313,53 @@ def tutorialNonFunctionCode(dataloader, dataName):
     print("Params to learn:")
     if feature_extract:
         params_to_update = []
-        for name,param in model_ft.named_parameters():
-            if param.requires_grad == True:
+        for name, param in model_ft.named_parameters():
+            if param.requires_grad:
                 params_to_update.append(param)
-                print("\t",name)
+                print("\t", name)
     else:
-        for name,param in model_ft.named_parameters():
-            if param.requires_grad == True:
-                print("\t",name)
+        for name, param in model_ft.named_parameters():
+            if param.requires_grad:
+                print("\t", name)
 
     # Observe that all parameters are being optimized
-    optimizer_ft = optim.SGD(params_to_update, lr=0.001, momentum=0.9)
+    # optimizer_ft = optim.SGD(params_to_update, lr=0.001, momentum=0.9)
+    optimizer_ft = build_optimizer(opt_name, model_ft, lr=lr, **opt_kwargs)
+
+    # THESE TWO ARE THE RIGHT SETTINGS FOR IWILDCAM AND CAMELYON -- CAN'T REMEMBER WHICH IS WHICH
+    # optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=0.01)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=3e-5)
 
     # Setup the loss fxn
-    if dataName == "mnist":
-        #For MNIST, the labels are binary
-        criterion = nn.BCELoss()
-    else:
-        criterion = nn.CrossEntropyLoss()
+    criterion = nn.BCELoss()
 
     # Train and evaluate
-    model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=num_epochs, is_inception=(model_name=="inception"))
+    model_ft, hist = train_model(
+            model_ft,
+            dataloaders_dict,
+            criterion,
+            optimizer_ft,
+            num_epochs=n_epochs,
+            is_inception=(model_name == "inception"),
+            limit_batches=limit_batches,
+        )
 
-    # # Initialize the non-pretrained version of the model used for this run
-    # scratch_model,_ = initialize_model(model_name, num_classes, feature_extract=False, use_pretrained=False)
-    # scratch_model = scratch_model.to(device)
-    # scratch_optimizer = optim.SGD(scratch_model.parameters(), lr=0.001, momentum=0.9)
-    # scratch_criterion = nn.CrossEntropyLoss()
-    # _,scratch_hist = train_model(scratch_model, dataloaders_dict, scratch_criterion, scratch_optimizer, num_epochs=num_epochs, is_inception=(model_name=="inception"))
-
-    # # Plot the training curves of validation accuracy vs. number
-    # #  of training epochs for the transfer learning method and
-    # #  the model trained from scratch
-    # ohist = []
-    # shist = []
-
-    # ohist = [h.cpu().numpy() for h in hist]
-    # shist = [h.cpu().numpy() for h in scratch_hist]
-
-    # plt.title("Validation Accuracy vs. Number of Training Epochs")
-    # plt.xlabel("Training Epochs")
-    # plt.ylabel("Validation Accuracy")
-    # plt.plot(range(1,num_epochs+1),ohist,label="Pretrained")
-    # plt.plot(range(1,num_epochs+1),shist,label="Scratch")
-    # plt.ylim((0,1.))
-    # plt.xticks(np.arange(1, num_epochs+1, 1.0))
-    # plt.legend()
-    # plt.show()
 
 if __name__ == '__main__':
     psr = ArgumentParser()
     psr.add_argument("--dataset", type=str, choices=['mnist'], default='mnist')
     psr.add_argument("--corr", type=float, default=0.7)
-    psr.add_argument("--tol", type=float, default=0.1)
     psr.add_argument("--seed", type=int, default=42)
+
+    psr.add_argument("--num-workers", default=os.cpu_count(), type=int)
+    psr.add_argument("--model-name", type=str, required=True)
+    psr.add_argument("--batch-size", default=16, type=int)
+    psr.add_argument("--n-epochs", default=50, type=int)
+    psr.add_argument("--opt-name", default="SGD", type=str)
+    psr.add_argument("--lr", type=float, required=True)
+    psr.add_argument("--opt-kwargs", type=str, nargs='+', default={})
+    psr.add_argument("--limit-batches", type=int, default=-1)
+
     args = psr.parse_args()
 
     if args.dataset == 'mnist':
@@ -374,6 +368,15 @@ if __name__ == '__main__':
                 spurious_match_prob=args.corr,
                 seed=args.seed,
             )
-        dataloader = DataLoader(dataset, batch_size=1000)
+        dataloader = DataLoader(dataset, batch_size=args.batch_size) # TODO: need to separately define train + eval for each expeirment
 
-        tutorialNonFunctionCode(dataloader, args.dataset)
+        train_eval_model(
+            dataloader,
+            args.model_name,
+            args.n_epochs,
+            args.opt_name,
+            args.lr,
+            parse_argdict(args.opt_kwargs),
+            args.limit_batches,
+        )
+
