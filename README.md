@@ -27,3 +27,16 @@ This command will check to see if Pr[Y == Z] in a batch is near (`--tol`) the ex
 python datasets.py --seed [YOUR_SEED_HERE] --dataset ['mnist' or 'wilds'] --corr [YOUR_CORRELATION] --tol [YOUR_ERROR_TOLERANCE]
 ```
 
+## Running stuff
+
+Here's a command as an example:
+```
+python training_pipeline.py --n-epochs 10 --model-name resnet --opt-name Adam --lr 1e-3
+```
+
+This will train a ResNet model for 10 epochs on MNIST using the Adam optimize with learning rate 3. Add the `--limit-batches` keyword for debugging -- this stops the train/val epochs after whatever number of batches you'd like so you can make sure errors don't surprise you after a long epoch.
+
+## TODOS
+* An evaluation script
+* Integrate Camelyon and iWildCam
+* Specifying different train and val dataloaders
