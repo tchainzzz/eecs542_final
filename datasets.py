@@ -99,6 +99,7 @@ class CorrelatedIWildcam(CorrelatedWILDSDataset):
 class CorrelatedMNIST(Dataset):
     def __init__(
         self,
+	root_dir="/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/ctrenton/MNIST/",
         mode="train",
         transform=None,
         spurious_feature_fn=T.RandomRotation(degrees=90),
@@ -106,7 +107,6 @@ class CorrelatedMNIST(Dataset):
         digits=[2, 8],
         normalize=False,
         seed=42,
-        root_dir='./data'
     ):
         torch.manual_seed(seed)
 

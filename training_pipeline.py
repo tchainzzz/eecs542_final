@@ -271,13 +271,13 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers)
                 mode="train",
                 spurious_match_prob=args.corr,
                 seed=args.seed,
-                root=root_dir,
+                root_dir=root_dir,
             )
         test_dataset = datasets.CorrelatedMNIST(
                 mode="test",
                 spurious_match_prob=args.corr,
                 seed=args.seed,
-                root=root_dir,
+                root_dir=root_dir,
             )
         train_dl = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers)
         test_dl = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
