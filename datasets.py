@@ -16,7 +16,7 @@ class CorrelatedWILDSDataset(Dataset):
         dataset_name,
         mode="train",
         transform=None,
-        root_dir="./data/",
+        root_dir="/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/WildsData/camelyon17_v1.0",
         size=96,  # 448 for iwildcam
         domains=[0, 1],
         normalize=False,
@@ -99,6 +99,7 @@ class CorrelatedIWildcam(CorrelatedWILDSDataset):
 class CorrelatedMNIST(Dataset):
     def __init__(
         self,
+	root_dir="/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/ctrenton/MNIST/",
         mode="train",
         transform=None,
         spurious_feature_fn=T.RandomRotation(degrees=90),
@@ -118,13 +119,13 @@ class CorrelatedMNIST(Dataset):
         self.digits = digits
         if mode == "train":
             data = datasets.MNIST(
-                root="data",
+                root=root_dir,
                 train=True,
                 download=True,
             )
         elif mode == "test":
             data = datasets.MNIST(
-                root="data",
+                root=root_dir,
                 train=False,
                 download=True,
             )

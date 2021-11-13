@@ -265,17 +265,19 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
     return model_ft_2head, input_size
 
 
-def get_dataloaders(dataset_name, corr, seed, batch_size, num_workers):
+def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers):
     if dataset_name == 'mnist':
         train_dataset = datasets.CorrelatedMNIST(
                 mode="train",
                 spurious_match_prob=args.corr,
                 seed=args.seed,
+                root_dir=root_dir,
             )
         test_dataset = datasets.CorrelatedMNIST(
                 mode="test",
                 spurious_match_prob=args.corr,
                 seed=args.seed,
+                root_dir=root_dir,
             )
         train_dl = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers)
         test_dl = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
@@ -284,17 +286,17 @@ def get_dataloaders(dataset_name, corr, seed, batch_size, num_workers):
                 dataset_name,
                 mode="train",
                 transform=None, # matybe change
-                root_dir="./data", # make configurable
+                root_dir=root_dir, # make configurable
                 size=(96 if dataset_name == 'camelyon17' else 448),
                 domains=[0, 1],
                 normalize=True,
                 seed=42,
             )
-        train_dataset = datasets.CorrelatedWILDSDataset(
+        test_dataset = datasets.CorrelatedWILDSDataset(
                 dataset_name,
                 mode="id_val",
                 transform=None, # matybe change
-                root_dir="./data", # make configurable
+                root_dir=root_dir, # make configurable
                 size=(96 if dataset_name == 'camelyon17' else 448),
                 domains=[0, 1],
                 normalize=True,
@@ -325,6 +327,7 @@ def run_experiment(
         batch_size,
         opt_name,
         lr,
+        root_dir,
         opt_kwargs,
         limit_batches=-1,
         seed=42,
@@ -337,7 +340,7 @@ def run_experiment(
     
     # Top level data directory. Here we assume the format of the directory conforms
     #   to the ImageFolder structure
-    data_dir = "./data/"
+    data_dir = root_dir#"./data/"
 
     # Number of classes in the dataset
     num_classes = 2
@@ -376,7 +379,7 @@ def run_experiment(
     # image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x]) for x in ['train', 'val']}
     # # Create training and validation dataloaders
     # dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=4) for x in ['train', 'val']}
-    train_dl, val_dl = get_dataloaders(dataset_name, corr, seed, batch_size, num_workers)
+    train_dl, val_dl = get_dataloaders(dataset_name, root_dir,corr, seed, batch_size, num_workers)
 
     dataloaders_dict = {
         "train": train_dl,
@@ -431,7 +434,7 @@ def run_experiment(
 
 if __name__ == '__main__':
     psr = ArgumentParser()
-    psr.add_argument("--dataset", type=str, choices=['mnist'], default='mnist')
+    psr.add_argument("--dataset", type=str, choices=['mnist','camelyon17'], default='mnist')
     psr.add_argument("--corr", type=float, default=0.7)
     psr.add_argument("--seed", type=int, default=42)
     psr.add_argument("--wandb_expt_name", type=str, required=True)
@@ -444,6 +447,7 @@ if __name__ == '__main__':
     psr.add_argument("--lr", type=float, required=True)
     psr.add_argument("--opt_kwargs", type=str, nargs='+', default={})
     psr.add_argument("--limit_batches", type=int, default=-1)
+    psr.add_argument("--root_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/WildsData/camelyon17_v1.0')
 
     args = psr.parse_args()
     parsed_opt_kwargs = parse_argdict(args.opt_kwargs)
@@ -461,6 +465,7 @@ if __name__ == '__main__':
         args.batch_size,
         args.opt_name,
         args.lr,
+        args.root_dir,
         parsed_opt_kwargs,
         limit_batches=args.limit_batches,
         seed=args.seed,
