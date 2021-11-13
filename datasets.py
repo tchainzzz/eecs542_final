@@ -36,7 +36,7 @@ class CorrelatedWILDSDataset(Dataset):
 
         self.domains = domains
         dataset = get_dataset(dataset=dataset_name, download=True)
-        data = dataset.get_subset(mode)
+        data = dataset.get_subset("train" if mode == "train" else "id_val")
         self.data_dir = os.path.join(root_dir, f"{dataset_name}_v{dataset.version}")
 
         # indexes into 'hospital' field (camelyon) or 'location' (iwildcam)

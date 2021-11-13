@@ -16,6 +16,8 @@ import torchvision
 from torchvision import models, transforms
 from utils import parse_argdict
 
+# Logging
+import wandb
 
 #note: originally designed for resnet but should work on anything that can use sequential (for first iteration of this implementation)
 class TwoHeadResNet(torch.nn.Module):
@@ -55,9 +57,10 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
     best_acc_class = 0.0
 
     for epoch in range(num_epochs):
-
+        
         # Each epoch has a training and validation phase
         for phase in ['train', 'val']:
+            print("Starting ", phase, " phase")
             if phase == 'train':
                 model.train()  # Set model to training mode
             else:
@@ -129,6 +132,14 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                     "f1": f1_score(all_y.detach().numpy(), all_preds.detach().numpy()),
                     "auc": roc_auc_score(all_y.detach().numpy(), all_scores.detach().numpy())
                 })
+               
+                if phase == 'train':
+                    # Logging: 
+                    wandb.log({phase+'_loss_classification_step':loss_class.item(), phase+'_loss_domain_step':loss_domain.item(), 
+                               phase+'_accuracy_classification_step':accuracy_score(labels.detach().numpy(),preds_class.detach().numpy()), phase+'_accuracy_domain_step':accuracy_score(labels.detach().numpy(),preds_class.detach().numpy()),
+                               phase+'_f1_classification_step':f1_score(labels.detach().numpy(), preds_class.detach().numpy()), phase+'_f1_domain_step':f1_score(labels.detach().numpy(), preds_class.detach().numpy()),
+                               phase+'_auc_classification_step': roc_auc_score(labels.detach().numpy(), preds_class.detach().numpy()), phase+'_auc_domain_step': roc_auc_score(labels.detach().numpy(), preds_class.detach().numpy())})
+                    
                 # TODO: CALCULATE METRICS FOR AUX_OUTPUTS AS WELL
 
             epoch_loss_class = running_loss_class / len(dataloaders[phase].dataset)
@@ -142,15 +153,25 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             epoch_auc_domain = roc_auc_score(all_domains.detach().numpy(), all_domain_scores.detach().numpy())
 
             # TODO: SAVE THESE
+    
+            wandb.log({phase+'_loss_classification_epoch':epoch_loss_class, phase+'_loss_domain_epoch':epoch_loss_domain, 
+                       phase+'_accuracy_classification_epoch':epoch_acc_class, phase+'_accuracy_domain_epoch':epoch_acc_domain,
+                       phase+'_f1_classification_epoch':epoch_f1_class, phase+'_f1_domain_epoch':epoch_f1_domain,
+                       phase+'_auc_classification_epoch': epoch_auc_class, phase+'_auc_domain_epoch':epoch_auc_domain})    
+            
 
             print('{} C-Loss: {:.4f} C-Acc: {:.4f} C-F1: {:.4f} C-AUC: {:.4f}'.format(phase, epoch_loss_class, epoch_acc_class, epoch_f1_class, epoch_auc_class))
             print('{} D-Loss: {:.4f} D-Acc: {:.4f} D-F1: {:.4f} D-AUC: {:.4f}'.format(phase, epoch_loss_domain, epoch_acc_domain, epoch_f1_domain, epoch_auc_domain))
+            
+            
+            
             # deep copy the model
             if phase == 'val' and epoch_acc_class > best_acc_class:
                 best_acc_class = epoch_acc_class
                 best_model_wts = copy.deepcopy(model.state_dict())
             if phase == 'val':
                 val_acc_history.append(epoch_acc_class)
+            # TODO: SAVE THIS SOMEHOW
 
         print()
 
@@ -243,18 +264,77 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
     model_ft_2head = TwoHeadResNet(model_ft)
     return model_ft_2head, input_size
 
-def train_eval_model(
-        dataloader,
+
+def get_dataloaders(dataset_name, corr, seed, batch_size, num_workers):
+    if dataset_name == 'mnist':
+        train_dataset = datasets.CorrelatedMNIST(
+                mode="train",
+                spurious_match_prob=args.corr,
+                seed=args.seed,
+            )
+        test_dataset = datasets.CorrelatedMNIST(
+                mode="test",
+                spurious_match_prob=args.corr,
+                seed=args.seed,
+            )
+        train_dl = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers)
+        test_dl = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
+    elif dataset_name in ['camelyon17', 'iwildcam']:
+        train_dataset = datasets.CorrelatedWILDSDataset(
+                dataset_name,
+                mode="train",
+                transform=None, # matybe change
+                root_dir="./data", # make configurable
+                size=(96 if dataset_name == 'camelyon17' else 448),
+                domains=[0, 1],
+                normalize=True,
+                seed=42,
+            )
+        train_dataset = datasets.CorrelatedWILDSDataset(
+                dataset_name,
+                mode="id_val",
+                transform=None, # matybe change
+                root_dir="./data", # make configurable
+                size=(96 if dataset_name == 'camelyon17' else 448),
+                domains=[0, 1],
+                normalize=True,
+                seed=42,
+            )
+        train_dl = DataLoader(
+                train_dataset,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                sampler=train_dataset.get_correlation_sampler(args.corr),
+            )
+        test_dl =  DataLoader(
+                test_dataset,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                sampler=test_dataset.get_correlation_sampler(args.corr),
+                )
+    else:
+        raise ValueError(f"Dataset with name '{dataset_name}' not supported.")
+    return train_dl, test_dl
+
+
+def run_experiment(
+        dataset_name,
+        corr,
         model_name,  # [resnet, alexnet, vgg, squeezenet, densenet, inception]
         n_epochs,
+        batch_size,
         opt_name,
         lr,
         opt_kwargs,
         limit_batches=-1,
+        seed=42,
+        num_workers=4,
 ):
     print("PyTorch Version: ", torch.__version__)
     print("Torchvision Version: ", torchvision.__version__)
 
+    
+    
     # Top level data directory. Here we assume the format of the directory conforms
     #   to the ImageFolder structure
     data_dir = "./data/"
@@ -296,8 +376,12 @@ def train_eval_model(
     # image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x]) for x in ['train', 'val']}
     # # Create training and validation dataloaders
     # dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=4) for x in ['train', 'val']}
+    train_dl, val_dl = get_dataloaders(dataset_name, corr, seed, batch_size, num_workers)
 
-    dataloaders_dict = {x: dataloader for x in ['train', 'val']}
+    dataloaders_dict = {
+        "train": train_dl,
+        "val": val_dl,
+    } # b-b-but wait! why are we evaluating on test straight-up? bc we're not doing model selection -- idc how good a model does!
 
 
     #----------------------------------- OPTIMIZER -----------------------------------
@@ -350,33 +434,36 @@ if __name__ == '__main__':
     psr.add_argument("--dataset", type=str, choices=['mnist'], default='mnist')
     psr.add_argument("--corr", type=float, default=0.7)
     psr.add_argument("--seed", type=int, default=42)
+    psr.add_argument("--wandb_expt_name", type=str, required=True)
 
-    psr.add_argument("--num-workers", default=os.cpu_count(), type=int)
-    psr.add_argument("--model-name", type=str, required=True)
-    psr.add_argument("--batch-size", default=16, type=int)
-    psr.add_argument("--n-epochs", default=50, type=int)
-    psr.add_argument("--opt-name", default="SGD", type=str)
+    psr.add_argument("--num_workers", default=os.cpu_count(), type=int)
+    psr.add_argument("--model_name", type=str, required=True)
+    psr.add_argument("--batch_size", default=17, type=int)
+    psr.add_argument("--n_epochs", default=5, type=int)
+    psr.add_argument("--opt_name", default="SGD", type=str)
     psr.add_argument("--lr", type=float, required=True)
-    psr.add_argument("--opt-kwargs", type=str, nargs='+', default={})
-    psr.add_argument("--limit-batches", type=int, default=-1)
+    psr.add_argument("--opt_kwargs", type=str, nargs='+', default={})
+    psr.add_argument("--limit_batches", type=int, default=-1)
 
     args = psr.parse_args()
+    parsed_opt_kwargs = parse_argdict(args.opt_kwargs)
+    
+    metadata = {**vars(args), **parsed_opt_kwargs}
+    
+    wandb.init(project="eecs542", entity="eecs542", config=metadata)
+    wandb.run.name = args.wandb_expt_name
 
-    if args.dataset == 'mnist':
-
-        dataset = datasets.CorrelatedMNIST(
-                spurious_match_prob=args.corr,
-                seed=args.seed,
-            )
-        dataloader = DataLoader(dataset, batch_size=args.batch_size) # TODO: need to separately define train + eval for each expeirment
-
-        train_eval_model(
-            dataloader,
-            args.model_name,
-            args.n_epochs,
-            args.opt_name,
-            args.lr,
-            parse_argdict(args.opt_kwargs),
-            args.limit_batches,
-        )
+    run_experiment(
+        args.dataset,
+        args.corr,
+        args.model_name,
+        args.n_epochs,
+        args.batch_size,
+        args.opt_name,
+        args.lr,
+        parsed_opt_kwargs,
+        limit_batches=args.limit_batches,
+        seed=args.seed,
+        num_workers=args.num_workers,
+    )
 
