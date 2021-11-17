@@ -48,7 +48,7 @@ class TwoHeadResNet(torch.nn.Module):
 # Detect if we have a GPU available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False, limit_batches=-1):
+def train_model(model, dataloaders, criterion, optimizer, save_dir, num_epochs=25, is_inception=False, limit_batches=-1):
     since = time.time()
 
     val_acc_history = []
@@ -169,6 +169,8 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
             if phase == 'val' and epoch_acc_class > best_acc_class:
                 best_acc_class = epoch_acc_class
                 best_model_wts = copy.deepcopy(model.state_dict())
+                torch.save(model, save_dir+"_bestacc_"+str(best_acc_class)+".pth")
+            torch.save(model, save_dir+"latest.pth")
             if phase == 'val':
                 val_acc_history.append(epoch_acc_class)
             # TODO: SAVE THIS SOMEHOW
@@ -328,6 +330,7 @@ def run_experiment(
         opt_name,
         lr,
         root_dir,
+        save_dir,
         opt_kwargs,
         limit_batches=-1,
         seed=42,
@@ -426,6 +429,7 @@ def run_experiment(
             dataloaders_dict,
             criterion,
             optimizer_ft,
+            save_dir,
             num_epochs=n_epochs,
             is_inception=(model_name == "inception"),
             limit_batches=limit_batches,
@@ -448,6 +452,7 @@ if __name__ == '__main__':
     psr.add_argument("--opt_kwargs", type=str, nargs='+', default={})
     psr.add_argument("--limit_batches", type=int, default=-1)
     psr.add_argument("--root_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/WildsData/camelyon17_v1.0')
+    psr.add_argument("--save_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/saved_models/mnist/run1')
 
     args = psr.parse_args()
     parsed_opt_kwargs = parse_argdict(args.opt_kwargs)
@@ -466,6 +471,7 @@ if __name__ == '__main__':
         args.opt_name,
         args.lr,
         args.root_dir,
+        args.save_dir,
         parsed_opt_kwargs,
         limit_batches=args.limit_batches,
         seed=args.seed,
