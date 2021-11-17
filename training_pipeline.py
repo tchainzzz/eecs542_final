@@ -49,6 +49,102 @@ class TwoHeadResNet(torch.nn.Module):
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("Using device", device)
 
+def do_phase(phase, model, pbar, criterion=None, optimizer=None, limit_batches=-1):
+    if phase == 'train':
+        model.train()  # Set model to training mode
+        assert optimizer is not None, "You need to have an optimizer to, uh, optimize stuff."
+    else:
+        model.eval()   # Set model to evaluate mode
+
+    # initialize metric-storing structures
+    running_loss_class = 0.0
+    running_loss_domain = 0.0
+
+    all_y = torch.Tensor()
+    all_scores = torch.Tensor()
+    all_preds = torch.Tensor()
+
+    all_domains = torch.Tensor()
+    all_domain_scores = torch.Tensor()
+    all_domain_preds = torch.Tensor()
+
+    # create progress bar
+    for i, (inputs, labels, domains) in pbar:
+        # iterate through data -- batch optimization
+        if i == limit_batches:
+            break
+
+        # move data to correct devices/shape as needed
+        inputs = inputs.to(device)
+        labels = labels.to(device)
+        domains = domains.to(device)
+
+        labels = labels.view(-1, 1)
+        labels = labels.to(torch.float32)
+        domains = domains.view(-1, 1)
+        domains = domains.to(torch.float32)
+
+        # zero the parameter gradients
+        optimizer.zero_grad()
+
+        # forward
+        # track history if only in train
+        with torch.set_grad_enabled(phase == 'train'):
+            # Get model outputs and calculate loss
+            scores_class, scores_domain = model(inputs) # list of probabilities with shape (1, batch_size)
+            if criterion:
+                loss_class = criterion(scores_class, labels)
+                loss_domain = criterion(scores_domain, domains)
+
+            preds_class = torch.where(scores_class < 0.5, 0, 1)
+            preds_domain = torch.where(scores_domain < 0.5, 0, 1)
+            # backward + optimize only if in training phase
+            if phase == 'train':
+                loss_class.backward()
+                loss_domain.backward()
+                optimizer.step()
+
+        all_y = torch.cat((all_y, labels))
+        all_preds = torch.cat((all_preds, preds_class))
+        all_scores = torch.cat((all_scores, scores_class))
+
+        all_domains = torch.cat((all_domains, domains))
+        all_domain_preds = torch.cat((all_domain_preds, preds_domain))
+        all_domain_scores = torch.cat((all_domain_scores, scores_domain))
+
+        # statistics
+        running_loss_class += loss_class.item() * inputs.size(0)
+        running_loss_domain += loss_domain.item() * inputs.size(0)
+        pbar.set_postfix({
+            "loss": running_loss_class / all_y.size(0),
+            "acc": accuracy_score(all_y.detach().numpy(), all_preds.detach().numpy()),
+            "f1": f1_score(all_y.detach().numpy(), all_preds.detach().numpy()),
+            "auc": roc_auc_score(all_y.detach().numpy(), all_scores.detach().numpy())
+        })
+
+        if phase == 'train':
+            # Logging: 
+            wandb.log({
+                phase+'_loss_classification_step':loss_class.item(),
+                phase+'_loss_domain_step':loss_domain.item(), 
+                phase+'_accuracy_classification_step':accuracy_score(labels.detach().numpy(),preds_class.detach().numpy()),
+                phase+'_accuracy_domain_step':accuracy_score(labels.detach().numpy(),preds_class.detach().numpy()),
+                phase+'_f1_classification_step':f1_score(labels.detach().numpy(), preds_class.detach().numpy()), 
+                phase+'_f1_domain_step':f1_score(labels.detach().numpy(), preds_class.detach().numpy()),
+                phase+'_auc_classification_step': roc_auc_score(labels.detach().numpy(), preds_class.detach().numpy()), 
+                phase+'_auc_domain_step': roc_auc_score(labels.detach().numpy(), preds_class.detach().numpy())
+            })
+        return model, running_loss_class, all_y, all_preds, all_scores, running_loss_domain, all_domains, all_domain_preds, all_domain_scores # may god forgive me for this return statement
+
+def calculate_epoch_metrics(loss, y, preds, scores):
+    assert y.size(0) == preds.size(0)
+    assert preds.size(0) == scores.size(0)
+    loss = loss / y.size(0)
+    acc = accuracy_score(y.detach().numpy(), preds.detach().numpy())
+    f1 = f1_score(y.detach().numpy(), preds.detach().numpy())
+    auc = roc_auc_score(y.detach().numpy(), scores.detach().numpy())
+    return loss, acc, f1, auc
+    
 def train_model(model, dataloaders, criterion, optimizer, save_dir, num_epochs=25, is_inception=False, limit_batches=-1):
     since = time.time()
 
@@ -58,109 +154,21 @@ def train_model(model, dataloaders, criterion, optimizer, save_dir, num_epochs=2
     best_acc_class = 0.0
 
     for epoch in range(num_epochs):
-        
         # Each epoch has a training and validation phase
         for phase in ['train', 'val']:
             print("Starting ", phase, " phase")
-            if phase == 'train':
-                model.train()  # Set model to training mode
-            else:
-                model.eval()   # Set model to evaluate mode
-
-            # initialize metric-storing structures
-            running_loss_class = 0.0
-            running_loss_domain = 0.0
-
-            all_y = torch.Tensor()
-            all_scores = torch.Tensor()
-            all_preds = torch.Tensor()
-
-            all_domains = torch.Tensor()
-            all_domain_scores = torch.Tensor()
-            all_domain_preds = torch.Tensor()
-
-            # create progress bar
             pbar = tqdm(enumerate(dataloaders[phase]), total=len(dataloaders[phase]))
             pbar.set_description(f"{phase.upper()} - Epoch {epoch+1} / {num_epochs}")
-            for i, (inputs, labels, domains) in pbar:
-                # iterate through data -- batch optimization
-                if i == limit_batches:
-                    break
+            model, running_loss_class, all_y, all_preds, all_scores, running_loss_domain, all_domains, all_domain_preds, all_domain_scores = do_phase(phase, model, pbar, criterion=criterion, optimizer=optimizer, limit_batches=limit_batches)
 
-                # move data to correct devices/shape as needed
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-                domains = domains.to(device)
-
-                labels = labels.view(-1, 1)
-                labels = labels.to(torch.float32)
-                domains = domains.view(-1, 1)
-                domains = domains.to(torch.float32)
-
-                # zero the parameter gradients
-                optimizer.zero_grad()
-
-                # forward
-                # track history if only in train
-                with torch.set_grad_enabled(phase == 'train'):
-                    # Get model outputs and calculate loss
-                    scores_class, scores_domain = model(inputs) # list of probabilities with shape (1, batch_size)
-                    loss_class = criterion(scores_class, labels)
-                    loss_domain = criterion(scores_domain, domains)
-
-                    preds_class = torch.where(scores_class < 0.5, 0, 1)
-                    preds_domain = torch.where(scores_domain < 0.5, 0, 1)
-                    # backward + optimize only if in training phase
-                    if phase == 'train':
-                        loss_class.backward()
-                        loss_domain.backward()
-                        optimizer.step()
-
-                all_y = torch.cat((all_y, labels))
-                all_preds = torch.cat((all_preds, preds_class))
-                all_scores = torch.cat((all_scores, scores_class))
-
-                all_domains = torch.cat((all_domains, domains))
-                all_domain_preds = torch.cat((all_domain_preds, preds_domain))
-                all_domain_scores = torch.cat((all_domain_scores, scores_domain))
-
-                # statistics
-                running_loss_class += loss_class.item() * inputs.size(0)
-                running_loss_domain += loss_domain.item() * inputs.size(0)
-                pbar.set_postfix({
-                    "loss": running_loss_class / all_y.size(0),
-                    "acc": accuracy_score(all_y.detach().numpy(), all_preds.detach().numpy()),
-                    "f1": f1_score(all_y.detach().numpy(), all_preds.detach().numpy()),
-                    "auc": roc_auc_score(all_y.detach().numpy(), all_scores.detach().numpy())
-                })
-               
-                if phase == 'train':
-                    # Logging: 
-                    wandb.log({phase+'_loss_classification_step':loss_class.item(), phase+'_loss_domain_step':loss_domain.item(), 
-                               phase+'_accuracy_classification_step':accuracy_score(labels.detach().numpy(),preds_class.detach().numpy()), phase+'_accuracy_domain_step':accuracy_score(labels.detach().numpy(),preds_class.detach().numpy()),
-                               phase+'_f1_classification_step':f1_score(labels.detach().numpy(), preds_class.detach().numpy()), phase+'_f1_domain_step':f1_score(labels.detach().numpy(), preds_class.detach().numpy()),
-                               phase+'_auc_classification_step': roc_auc_score(labels.detach().numpy(), preds_class.detach().numpy()), phase+'_auc_domain_step': roc_auc_score(labels.detach().numpy(), preds_class.detach().numpy())})
-                    
-                # TODO: CALCULATE METRICS FOR AUX_OUTPUTS AS WELL
-
-            epoch_loss_class = running_loss_class / len(dataloaders[phase].dataset)
-            epoch_acc_class = accuracy_score(all_y.detach().numpy(), all_preds.detach().numpy())
-            epoch_f1_class = f1_score(all_y.detach().numpy(), all_preds.detach().numpy())
-            epoch_auc_class = roc_auc_score(all_y.detach().numpy(), all_scores.detach().numpy())
-
-            epoch_loss_domain = running_loss_domain / len(dataloaders[phase].dataset)
-            epoch_acc_domain = accuracy_score(all_domains.detach().numpy(), all_domain_preds.detach().numpy())
-            epoch_f1_domain = f1_score(all_domains.detach().numpy(), all_domain_preds.detach().numpy())
-            epoch_auc_domain = roc_auc_score(all_domains.detach().numpy(), all_domain_scores.detach().numpy())
-
-            # TODO: SAVE THESE
+            epoch_loss_class, epoch_acc_class, epoch_f1_class, epoch_auc_class = calculate_epoch_metrics(running_loss_class, all_y, all_preds, all_scores)
+            epoch_loss_domain, epoch_acc_domain, epoch_f1_domain, epoch_auc_domain = calculate_epoch_metrics(running_loss_domain, all_domains, all_domain_preds, all_domain_scores)
     
             wandb.log({phase+'_loss_classification_epoch':epoch_loss_class, phase+'_loss_domain_epoch':epoch_loss_domain, 
                        phase+'_accuracy_classification_epoch':epoch_acc_class, phase+'_accuracy_domain_epoch':epoch_acc_domain,
                        phase+'_f1_classification_epoch':epoch_f1_class, phase+'_f1_domain_epoch':epoch_f1_domain,
                        phase+'_auc_classification_epoch': epoch_auc_class, phase+'_auc_domain_epoch':epoch_auc_domain})    
             
-
             print('{} C-Loss: {:.4f} C-Acc: {:.4f} C-F1: {:.4f} C-AUC: {:.4f}'.format(phase, epoch_loss_class, epoch_acc_class, epoch_f1_class, epoch_auc_class))
             print('{} D-Loss: {:.4f} D-Acc: {:.4f} D-F1: {:.4f} D-AUC: {:.4f}'.format(phase, epoch_loss_domain, epoch_acc_domain, epoch_f1_domain, epoch_auc_domain))
             
@@ -264,28 +272,32 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         exit()
 
 
-    model_ft_2head = TwoHeadResNet(model_ft)
+    model_ft_2head = TwoHeadResNet(model_ft) # TODO: generalize to multiple model types
     return model_ft_2head, input_size
 
 
-def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers):
+def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers, test_only=False):
+    if test_only:
+        train_dl = None
     if dataset_name == 'mnist':
-        train_dataset = datasets.CorrelatedMNIST(
-                mode="train",
-                spurious_match_prob=args.corr,
-                seed=args.seed,
-                root_dir=root_dir,
-            )
+        if not test_only:
+            train_dataset = datasets.CorrelatedMNIST(
+                    mode="train",
+                    spurious_match_prob=args.corr,
+                    seed=args.seed,
+                    root_dir=root_dir,
+                )
+            train_dl = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers)
         test_dataset = datasets.CorrelatedMNIST(
                 mode="test",
                 spurious_match_prob=args.corr,
                 seed=args.seed,
                 root_dir=root_dir,
             )
-        train_dl = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers)
         test_dl = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
     elif dataset_name in ['camelyon17', 'iwildcam']:
-        train_dataset = datasets.CorrelatedWILDSDataset(
+        if not test_only:
+            train_dataset = datasets.CorrelatedWILDSDataset(
                 dataset_name,
                 mode="train",
                 transform=None, # matybe change
@@ -295,6 +307,13 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers)
                 normalize=True,
                 seed=42,
             )
+            train_dl = DataLoader(
+                train_dataset,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                sampler=train_dataset.get_correlation_sampler(args.corr),
+            )
+
         test_dataset = datasets.CorrelatedWILDSDataset(
                 dataset_name,
                 mode="id_val",
@@ -304,12 +323,6 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers)
                 domains=[0, 1],
                 normalize=True,
                 seed=42,
-            )
-        train_dl = DataLoader(
-                train_dataset,
-                batch_size=batch_size,
-                num_workers=num_workers,
-                sampler=train_dataset.get_correlation_sampler(args.corr),
             )
         test_dl =  DataLoader(
                 test_dataset,
