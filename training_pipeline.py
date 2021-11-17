@@ -13,37 +13,39 @@ from tqdm.auto import tqdm
 
 import datasets
 import torchvision
-from torchvision import models, transforms
+# from torchvision import models, transforms
+from models import *
+from torchvision import transforms
 from utils import parse_argdict
 
 # Logging
 import wandb
 
 #note: originally designed for resnet but should work on anything that can use sequential (for first iteration of this implementation)
-class TwoHeadResNet(torch.nn.Module):
-    def __init__(self, resnetModel):
-        """
-        In the constructor we instantiate two nn.Linear modules and assign them as
-        member variables.
-        """
-        super(TwoHeadResNet, self).__init__()
-        self.l_input_size = resnetModel.fc.in_features
-        self.resnetBackbone = torch.nn.Sequential(*(list(resnetModel.children())[:-1]))
+# class TwoHeadResNet(torch.nn.Module):
+#     def __init__(self, resnetModel):
+#         """
+#         In the constructor we instantiate two nn.Linear modules and assign them as
+#         member variables.
+#         """
+#         super(TwoHeadResNet, self).__init__()
+#         self.l_input_size = resnetModel.fc.in_features
+#         self.resnetBackbone = torch.nn.Sequential(*(list(resnetModel.children())[:-1]))
 
-        self.classHead = torch.nn.Linear(self.l_input_size, 1)
-        self.domainHead = torch.nn.Linear(self.l_input_size, 1)
+#         self.classHead = torch.nn.Linear(self.l_input_size, 1)
+#         self.domainHead = torch.nn.Linear(self.l_input_size, 1)
 
-    def forward(self, x):
-        """
-        In the forward function we accept a Tensor of input data and we must return
-        a Tensor of output data. We can use Modules defined in the constructor as
-        well as arbitrary operators on Tensors.
-        """
-        backboneOut = self.resnetBackbone(x)
-        backboneOut = backboneOut.view(-1, self.l_input_size)
-        classOut = self.classHead(backboneOut)
-        domainOut = self.domainHead(backboneOut)
-        return torch.sigmoid(classOut), torch.sigmoid(domainOut)
+#     def forward(self, x):
+#         """
+#         In the forward function we accept a Tensor of input data and we must return
+#         a Tensor of output data. We can use Modules defined in the constructor as
+#         well as arbitrary operators on Tensors.
+#         """
+#         backboneOut = self.resnetBackbone(x)
+#         backboneOut = backboneOut.view(-1, self.l_input_size)
+#         classOut = self.classHead(backboneOut)
+#         domainOut = self.domainHead(backboneOut)
+#         return torch.sigmoid(classOut), torch.sigmoid(domainOut)
 
 # Detect if we have a GPU available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -134,7 +136,7 @@ def do_phase(phase, model, pbar, criterion=None, optimizer=None, limit_batches=-
                 phase+'_auc_classification_step': roc_auc_score(labels.detach().numpy(), preds_class.detach().numpy()), 
                 phase+'_auc_domain_step': roc_auc_score(labels.detach().numpy(), preds_class.detach().numpy())
             })
-        return model, running_loss_class, all_y, all_preds, all_scores, running_loss_domain, all_domains, all_domain_preds, all_domain_scores # may god forgive me for this return statement
+    return model, running_loss_class, all_y, all_preds, all_scores, running_loss_domain, all_domains, all_domain_preds, all_domain_scores # may god forgive me for this return statement
 
 def calculate_epoch_metrics(loss, y, preds, scores):
     assert y.size(0) == preds.size(0)
@@ -178,8 +180,8 @@ def train_model(model, dataloaders, criterion, optimizer, save_dir, num_epochs=2
             if phase == 'val' and epoch_acc_class > best_acc_class:
                 best_acc_class = epoch_acc_class
                 best_model_wts = copy.deepcopy(model.state_dict())
-                torch.save(model, save_dir+"_best_val_acc.pth")
-            torch.save(model, save_dir+"latest.pth")
+                torch.save(model.state_dict(), save_dir+"_best_val_acc.pth")
+            torch.save(model.state_dict(), save_dir+"latest.pth")
             if phase == 'val':
                 val_acc_history.append(epoch_acc_class)
             # TODO: SAVE THIS SOMEHOW
@@ -197,83 +199,83 @@ def train_model(model, dataloaders, criterion, optimizer, save_dir, num_epochs=2
 def build_optimizer(opt_name, model, **kwargs):
     return getattr(torch.optim, opt_name)(model.parameters(), **kwargs)
 
-def set_parameter_requires_grad(model, feature_extracting):
-    if feature_extracting:
-        for param in model.parameters():
-            param.requires_grad = False
+# def set_parameter_requires_grad(model, feature_extracting):
+#     if feature_extracting:
+#         for param in model.parameters():
+#             param.requires_grad = False
 
-def initialize_model(model_name, num_classes, feature_extract, use_pretrained=True):
-    # Initialize these variables which will be set in this if statement. Each of these
-    #   variables is model specific.
-    model_ft = None
-    input_size = 0
+# def initialize_model(model_name, num_classes, feature_extract, use_pretrained=True):
+#     # Initialize these variables which will be set in this if statement. Each of these
+#     #   variables is model specific.
+#     model_ft = None
+#     input_size = 0
 
-    if model_name == "resnet":
-        """ Resnet18
-        """
-        model_ft = models.resnet18(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        num_ftrs = model_ft.fc.in_features
-        model_ft.fc = nn.Linear(num_ftrs, num_classes)
-        input_size = 224
+#     if model_name == "resnet":
+#         """ Resnet18
+#         """
+#         model_ft = models.resnet18(pretrained=use_pretrained)
+#         set_parameter_requires_grad(model_ft, feature_extract)
+#         num_ftrs = model_ft.fc.in_features
+#         model_ft.fc = nn.Linear(num_ftrs, num_classes)
+#         input_size = 224
 
-    elif model_name == "alexnet":
-        """ Alexnet
-        """
-        model_ft = models.alexnet(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        num_ftrs = model_ft.classifier[6].in_features
-        model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
-        input_size = 224
+#     elif model_name == "alexnet":
+#         """ Alexnet
+#         """
+#         model_ft = models.alexnet(pretrained=use_pretrained)
+#         set_parameter_requires_grad(model_ft, feature_extract)
+#         num_ftrs = model_ft.classifier[6].in_features
+#         model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
+#         input_size = 224
 
-    elif model_name == "vgg":
-        """ VGG11_bn
-        """
-        model_ft = models.vgg11_bn(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        num_ftrs = model_ft.classifier[6].in_features
-        model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
-        input_size = 224
+#     elif model_name == "vgg":
+#         """ VGG11_bn
+#         """
+#         model_ft = models.vgg11_bn(pretrained=use_pretrained)
+#         set_parameter_requires_grad(model_ft, feature_extract)
+#         num_ftrs = model_ft.classifier[6].in_features
+#         model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
+#         input_size = 224
 
-    elif model_name == "squeezenet":
-        """ Squeezenet
-        """
-        model_ft = models.squeezenet1_0(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1, 1), stride=(1, 1))
-        model_ft.num_classes = num_classes
-        input_size = 224
+#     elif model_name == "squeezenet":
+#         """ Squeezenet
+#         """
+#         model_ft = models.squeezenet1_0(pretrained=use_pretrained)
+#         set_parameter_requires_grad(model_ft, feature_extract)
+#         model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1, 1), stride=(1, 1))
+#         model_ft.num_classes = num_classes
+#         input_size = 224
 
-    elif model_name == "densenet":
-        """ Densenet
-        """
-        model_ft = models.densenet121(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        num_ftrs = model_ft.classifier.in_features
-        model_ft.classifier = nn.Linear(num_ftrs, num_classes)
-        input_size = 224
+#     elif model_name == "densenet":
+#         """ Densenet
+#         """
+#         model_ft = models.densenet121(pretrained=use_pretrained)
+#         set_parameter_requires_grad(model_ft, feature_extract)
+#         num_ftrs = model_ft.classifier.in_features
+#         model_ft.classifier = nn.Linear(num_ftrs, num_classes)
+#         input_size = 224
 
-    elif model_name == "inception":
-        """ Inception v3
-        Be careful, expects (299,299) sized images and has auxiliary output
-        """
-        model_ft = models.inception_v3(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        # Handle the auxilary net
-        num_ftrs = model_ft.AuxLogits.fc.in_features
-        model_ft.AuxLogits.fc = nn.Linear(num_ftrs, num_classes)
-        # Handle the primary net
-        num_ftrs = model_ft.fc.in_features
-        model_ft.fc = nn.Linear(num_ftrs, num_classes)
-        input_size = 299
+#     elif model_name == "inception":
+#         """ Inception v3
+#         Be careful, expects (299,299) sized images and has auxiliary output
+#         """
+#         model_ft = models.inception_v3(pretrained=use_pretrained)
+#         set_parameter_requires_grad(model_ft, feature_extract)
+#         # Handle the auxilary net
+#         num_ftrs = model_ft.AuxLogits.fc.in_features
+#         model_ft.AuxLogits.fc = nn.Linear(num_ftrs, num_classes)
+#         # Handle the primary net
+#         num_ftrs = model_ft.fc.in_features
+#         model_ft.fc = nn.Linear(num_ftrs, num_classes)
+#         input_size = 299
 
-    else:
-        print("Invalid model name, exiting...")
-        exit()
+#     else:
+#         print("Invalid model name, exiting...")
+#         exit()
 
 
-    model_ft_2head = TwoHeadResNet(model_ft) # TODO: generalize to multiple model types
-    return model_ft_2head, input_size
+#     model_ft_2head = TwoHeadResNet(model_ft) # TODO: generalize to multiple model types
+#     return model_ft_2head, input_size
 
 
 def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers, test_only=False):
@@ -283,15 +285,15 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers,
         if not test_only:
             train_dataset = datasets.CorrelatedMNIST(
                     mode="train",
-                    spurious_match_prob=args.corr,
-                    seed=args.seed,
+                    spurious_match_prob=corr,
+                    seed=seed,
                     root_dir=root_dir,
                 )
             train_dl = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers)
         test_dataset = datasets.CorrelatedMNIST(
                 mode="test",
-                spurious_match_prob=args.corr,
-                seed=args.seed,
+                spurious_match_prob=corr,
+                seed=seed,
                 root_dir=root_dir,
             )
         test_dl = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
@@ -311,7 +313,7 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers,
                 train_dataset,
                 batch_size=batch_size,
                 num_workers=num_workers,
-                sampler=train_dataset.get_correlation_sampler(args.corr),
+                sampler=train_dataset.get_correlation_sampler(corr),
             )
 
         test_dataset = datasets.CorrelatedWILDSDataset(
@@ -328,7 +330,7 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers,
                 test_dataset,
                 batch_size=batch_size,
                 num_workers=num_workers,
-                sampler=test_dataset.get_correlation_sampler(args.corr),
+                sampler=test_dataset.get_correlation_sampler(corr),
                 )
     else:
         raise ValueError(f"Dataset with name '{dataset_name}' not supported.")

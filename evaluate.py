@@ -4,16 +4,18 @@ import os
 import torch
 
 from training_pipeline import do_phase, get_dataloaders, initialize_model
+from models import *
 
 if __name__ == '__main__':
     psr = ArgumentParser()
-    psr.add_argument("--model-file", type=str, required=True)
-    psr.add_argument("--model-type", type=str, required=True)
+    psr.add_argument("--model_file", type=str, required=True)
+    psr.add_argument("--model_name", type=str, required=True)
     psr.add_argument("--dataset", type=str, required=True, choices=['mnist', 'camelyon17', 'iwildcam'])
     psr.add_argument("--corr", type=float, required=True)
-    psr.add_argument("--batch-size", type=int, default=32)
-    psr.add_argument("--num-workers", type=int, default=os.cpu_count() // 2)
+    psr.add_argument("--batch_size", type=int, default=32)
+    psr.add_argument("--num_workers", type=int, default=os.cpu_count() // 2)
     psr.add_argument("--seed", type=int, default=42)
+    psr.add_argument("--root_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/WildsData/camelyon17_v1.0')
     # psr.add_argument("--no-state-dict", action='store_true')
     args = psr.parse_args()
 
@@ -27,13 +29,20 @@ if __name__ == '__main__':
     #    use_pretrained=False
     #)
     # else:
-    model = torch.load(args.model_file)
+#     model = torch.load(args.model_file)
+    model, input_size = initialize_model(args.model_name, 2, True)
+    try:
+        weights = torch.load(args.model_file).state_dict()
+    except: 
+        weights = torch.load(args.model_file)
+    
+    model.load_state_dict(weights)
     model.eval()
 
     print("Loading dataset...")
     _, test_dl = get_dataloaders(
-        args.dataset_name,
-        root_dir,
+        args.dataset,
+        args.root_dir,
         args.corr,
         args.seed,
         args.batch_size,
@@ -41,7 +50,7 @@ if __name__ == '__main__':
         test_only=True,
     )
 
-    _, _, all_y, all_preds, all_scores, _, all_domains, all_domain_preds, all_domain_scores = do_phase(phase, model, pbar)
+    _, _, all_y, all_preds, all_scores, _, all_domains, all_domain_preds, all_domain_scores = do_phase('eval', model, pbar)
     _, acc_cls, f1_cls, auc_cls = calculate_epoch_metrics(running_loss_class, all_y, all_preds, all_scores)
     _, acc_dom, f1_dom, auc_dom = calculate_epoch_metrics(running_loss_domain, all_domains, all_domain_preds, all_domain_scores)
     print('C-Acc: {:.4f} C-F1: {:.4f} C-AUC: {:.4f}'.format(acc_cls, f1_cls, auc_cls))
