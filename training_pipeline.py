@@ -282,32 +282,54 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers)
         train_dl = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers)
         test_dl = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
     elif dataset_name in ['camelyon17', 'iwildcam']:
-        train_dataset = datasets.CorrelatedWILDSDataset(
-                dataset_name,
-                mode="train",
-                transform=None, # matybe change
-                root_dir=root_dir, # make configurable
-                size=(96 if dataset_name == 'camelyon17' else 448),
-                domains=[0, 1],
-                normalize=True,
-                seed=42,
-            )
-        test_dataset = datasets.CorrelatedWILDSDataset(
-                dataset_name,
-                mode="id_val",
-                transform=None, # matybe change
-                root_dir=root_dir, # make configurable
-                size=(96 if dataset_name == 'camelyon17' else 448),
-                domains=[0, 1],
-                normalize=True,
-                seed=42,
-            )
-        train_dl = DataLoader(
+        if not test_only:
+            if dataset_name == 'camelyon17':
+                train_dataset = datasets.CorrelatedCamelyon17(
+                    mode="train",
+                    transform=None, # matybe change
+                    root_dir=root_dir, # make configurable
+                    domains=[0, 1],
+                    normalize=True,
+                    seed=42,
+                )
+            elif dataset_name == 'iwildcam':
+                train_dataset = datasets.CorrelatedIWildcam(
+                    mode="train",
+                    transform=None, # matybe change
+                    root_dir=root_dir, # make configurable
+                    domains=[0, 1],
+                    normalize=True,
+                    seed=42,
+                )
+            train_dl = DataLoader(
                 train_dataset,
                 batch_size=batch_size,
                 num_workers=num_workers,
                 sampler=train_dataset.get_correlation_sampler(args.corr),
             )
+
+        if dataset_name == 'camelyon17':
+            test_dataset = datasets.CorrelatedWILDSDataset(
+                    dataset_name,
+                    mode="id_val",
+                    transform=None, # matybe change
+                    root_dir=root_dir, # make configurable
+                    domains=[0, 1],
+                    normalize=True,
+                    seed=42,
+                )
+        elif dataset_name == 'iwildcam':
+            test_dataset = datasets.CorrelatedIWildcam(
+                    dataset_name,
+                    mode="id_val",
+                    transform=None, # matybe change
+                    root_dir=root_dir, # make configurable
+                    domains=[0, 1],
+                    normalize=True,
+                    seed=42,
+                )
+
+
         test_dl =  DataLoader(
                 test_dataset,
                 batch_size=batch_size,
@@ -447,7 +469,9 @@ if __name__ == '__main__':
     psr.add_argument("--lr", type=float, required=True)
     psr.add_argument("--opt_kwargs", type=str, nargs='+', default={})
     psr.add_argument("--limit_batches", type=int, default=-1)
-    psr.add_argument("--root_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/WildsData/camelyon17_v1.0')
+    #psr.add_argument("--root_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/WildsData/camelyon17_v1.0')
+    psr.add_argument("--root_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/WildsData')
+    psr.add_argument("--save_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/saved_models/mnist/run1')
 
     args = psr.parse_args()
     parsed_opt_kwargs = parse_argdict(args.opt_kwargs)
