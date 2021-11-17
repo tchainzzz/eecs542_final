@@ -169,7 +169,7 @@ def train_model(model, dataloaders, criterion, optimizer, save_dir, num_epochs=2
             if phase == 'val' and epoch_acc_class > best_acc_class:
                 best_acc_class = epoch_acc_class
                 best_model_wts = copy.deepcopy(model.state_dict())
-                torch.save(model, save_dir+"_bestacc_"+str(best_acc_class)+".pth")
+                torch.save(model, save_dir+"_best_val_acc.pth")
             torch.save(model, save_dir+"latest.pth")
             if phase == 'val':
                 val_acc_history.append(epoch_acc_class)
