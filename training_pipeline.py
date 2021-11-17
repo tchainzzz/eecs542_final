@@ -47,6 +47,7 @@ class TwoHeadResNet(torch.nn.Module):
 
 # Detect if we have a GPU available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print("Using device", device)
 
 def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False, limit_batches=-1):
     since = time.time()
