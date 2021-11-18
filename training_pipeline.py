@@ -86,8 +86,9 @@ def do_phase(phase, model, pbar, criterion=None, optimizer=None, limit_batches=-
         domains = domains.view(-1, 1)
         domains = domains.to(torch.float32)
 
-        # zero the parameter gradients
-        optimizer.zero_grad()
+        if phase == 'train':
+            # zero the parameter gradients
+            optimizer.zero_grad()
 
         # forward
         # track history if only in train
@@ -115,8 +116,9 @@ def do_phase(phase, model, pbar, criterion=None, optimizer=None, limit_batches=-
         all_domain_scores = torch.cat((all_domain_scores, scores_domain))
 
         # statistics
-        running_loss_class += loss_class.item() * inputs.size(0)
-        running_loss_domain += loss_domain.item() * inputs.size(0)
+        if criterion:
+            running_loss_class += loss_class.item() * inputs.size(0)
+            running_loss_domain += loss_domain.item() * inputs.size(0)
         pbar.set_postfix({
             "loss": running_loss_class / all_y.size(0),
             "acc": accuracy_score(all_y.detach().numpy(), all_preds.detach().numpy()),
