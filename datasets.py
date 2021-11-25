@@ -35,7 +35,7 @@ class CorrelatedWILDSDataset(Dataset):
         )
 
         self.domains = domains
-        dataset = get_dataset(dataset=dataset_name, download=True)
+        dataset = get_dataset(dataset=dataset_name, download=False, root_dir=root_dir)
         data = dataset.get_subset("train" if mode == "train" else "id_val")
         self.data_dir = os.path.join(root_dir, f"{dataset_name}_v{dataset.version}")
 
@@ -46,6 +46,10 @@ class CorrelatedWILDSDataset(Dataset):
         files = np.array(data.dataset._input_array)
         self.paths = files[data.indices[idx1 | idx2]]
         self.domains = data.metadata_array[idx1 | idx2, 0]
+        
+        # 0-1 encode the domains
+        self.domains[self.domains == domains[0]] = 0
+        self.domains[self.domains == domains[1]] = 1
 
     def get_correlation_sampler(self, spurious_match_prob):
         """
@@ -55,6 +59,8 @@ class CorrelatedWILDSDataset(Dataset):
         """
         assert spurious_match_prob >= 0 and spurious_match_prob <= 1
         weights = (self.labels == self.domains) * (2 * spurious_match_prob - 1) + (1 - spurious_match_prob)
+        # weights[self.labels == self.domains] /= (self.labels == self.domains).sum()
+        # weights[self.labels != self.domains] /= (self.labels != self.domains).sum()
         sampler = WeightedRandomSampler(weights, len(weights))
         return sampler
 
@@ -86,13 +92,14 @@ class CorrelatedCamelyon17(CorrelatedWILDSDataset):
            self.paths[idx])
         return Image.open(img_filename).convert('RGB')
 
-
+IWILDCAM_NO_ANIMAL_LABEL = 0
 class CorrelatedIWildcam(CorrelatedWILDSDataset):
     def __init__(self, **kwargs):
         super().__init__('iwildcam', size=448, **kwargs)
+        self.labels[self.labels != IWILDCAM_NO_ANIMAL_LABEL] = 1 # binarize -- animal = 1
 
     def get_input(self, idx):
-        img_path = self.data_dir / 'train' / self.paths[idx]
+        img_path = os.path.join(self.data_dir, 'train', self.paths[idx])
         return Image.open(img_path)
 
 

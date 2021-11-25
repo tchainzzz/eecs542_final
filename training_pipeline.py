@@ -291,7 +291,7 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers,
                     seed=seed,
                     root_dir=root_dir,
                 )
-            train_dl = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers)
+            train_dl = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
         test_dataset = datasets.CorrelatedMNIST(
                 mode="test",
                 spurious_match_prob=corr,
@@ -301,13 +301,12 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers,
         test_dl = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
     elif dataset_name in ['camelyon17', 'iwildcam']:
         if not test_only:
-
             if dataset_name == 'camelyon17':
                 train_dataset = datasets.CorrelatedCamelyon17(
                     mode="train",
                     transform=None, # matybe change
                     root_dir=root_dir, # make configurable
-                    domains=[0, 1],
+                    domains=[0, 3],
                     normalize=True,
                     seed=42,
                 )
@@ -316,7 +315,7 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers,
                     mode="train",
                     transform=None, # matybe change
                     root_dir=root_dir, # make configurable
-                    domains=[0, 1],
+                    domains=[139, 230],
                     normalize=True,
                     seed=42,
                 )
@@ -329,22 +328,20 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers,
             )
 
         if dataset_name == 'camelyon17':
-            test_dataset = datasets.CorrelatedWILDSDataset(
-                    dataset_name,
+            test_dataset = datasets.CorrelatedCamelyon17(
                     mode="id_val",
                     transform=None, # matybe change
                     root_dir=root_dir, # make configurable
-                    domains=[0, 1],
+                    domains=[0, 3],
                     normalize=True,
                     seed=42,
                 )
         elif dataset_name == 'iwildcam':
             test_dataset = datasets.CorrelatedIWildcam(
-                    dataset_name,
                     mode="id_val",
                     transform=None, # matybe change
                     root_dir=root_dir, # make configurable
-                    domains=[0, 1],
+                    domains=[139, 230],
                     normalize=True,
                     seed=42,
                 )
@@ -476,7 +473,7 @@ def run_experiment(
 
 if __name__ == '__main__':
     psr = ArgumentParser()
-    psr.add_argument("--dataset", type=str, choices=['mnist','camelyon17'], default='mnist')
+    psr.add_argument("--dataset", type=str, choices=['mnist','camelyon17', 'iwildcam'], default='mnist')
     psr.add_argument("--corr", type=float, default=0.7)
     psr.add_argument("--seed", type=int, default=42)
     psr.add_argument("--wandb_expt_name", type=str, required=True)
