@@ -62,13 +62,13 @@ def do_phase(phase, model, pbar, criterion=None, optimizer=None, limit_batches=-
     running_loss_class = 0.0
     running_loss_domain = 0.0
 
-    all_y = torch.Tensor()
-    all_scores = torch.Tensor()
-    all_preds = torch.Tensor()
+    all_y = torch.Tensor().to(device)
+    all_scores = torch.Tensor().to(device)
+    all_preds = torch.Tensor().to(device)
 
-    all_domains = torch.Tensor()
-    all_domain_scores = torch.Tensor()
-    all_domain_preds = torch.Tensor()
+    all_domains = torch.Tensor().to(device)
+    all_domain_scores = torch.Tensor().to(device)
+    all_domain_preds = torch.Tensor().to(device)
 
     # create progress bar
     for i, (inputs, labels, domains) in pbar:
@@ -121,9 +121,9 @@ def do_phase(phase, model, pbar, criterion=None, optimizer=None, limit_batches=-
             running_loss_domain += loss_domain.item() * inputs.size(0)
         pbar.set_postfix({
             "loss": running_loss_class / all_y.size(0),
-            "acc": accuracy_score(all_y.detach().numpy(), all_preds.detach().numpy()),
-            "f1": f1_score(all_y.detach().numpy(), all_preds.detach().numpy()),
-            "auc": roc_auc_score(all_y.detach().numpy(), all_scores.detach().numpy())
+            "acc": accuracy_score(all_y.detach().cpu().numpy(), all_preds.detach().cpu().numpy()),
+            "f1": f1_score(all_y.detach().cpu().numpy(), all_preds.detach().cpu().numpy()),
+            "auc": roc_auc_score(all_y.detach().cpu().numpy(), all_scores.detach().cpu().numpy())
         })
 
         if phase == 'train':
@@ -131,12 +131,12 @@ def do_phase(phase, model, pbar, criterion=None, optimizer=None, limit_batches=-
             wandb.log({
                 phase+'_loss_classification_step':loss_class.item(),
                 phase+'_loss_domain_step':loss_domain.item(), 
-                phase+'_accuracy_classification_step':accuracy_score(labels.detach().numpy(),preds_class.detach().numpy()),
-                phase+'_accuracy_domain_step':accuracy_score(labels.detach().numpy(),preds_class.detach().numpy()),
-                phase+'_f1_classification_step':f1_score(labels.detach().numpy(), preds_class.detach().numpy()), 
-                phase+'_f1_domain_step':f1_score(labels.detach().numpy(), preds_class.detach().numpy()),
-                phase+'_auc_classification_step': roc_auc_score(labels.detach().numpy(), preds_class.detach().numpy()), 
-                phase+'_auc_domain_step': roc_auc_score(labels.detach().numpy(), preds_class.detach().numpy())
+                phase+'_accuracy_classification_step':accuracy_score(labels.detach().cpu().numpy(),preds_class.detach().cpu().numpy()),
+                phase+'_accuracy_domain_step':accuracy_score(labels.detach().cpu().numpy(),preds_class.detach().cpu().numpy()),
+                phase+'_f1_classification_step':f1_score(labels.detach().cpu().numpy(), preds_class.detach().cpu().numpy()), 
+                phase+'_f1_domain_step':f1_score(labels.detach().cpu().numpy(), preds_class.detach().cpu().numpy()),
+                phase+'_auc_classification_step': roc_auc_score(labels.detach().cpu().numpy(), preds_class.detach().cpu().numpy()), 
+                phase+'_auc_domain_step': roc_auc_score(labels.detach().cpu().numpy(), preds_class.detach().cpu().numpy())
             })
     return model, running_loss_class, all_y, all_preds, all_scores, running_loss_domain, all_domains, all_domain_preds, all_domain_scores # may god forgive me for this return statement
 
@@ -144,9 +144,9 @@ def calculate_epoch_metrics(loss, y, preds, scores):
     assert y.size(0) == preds.size(0)
     assert preds.size(0) == scores.size(0)
     loss = loss / y.size(0)
-    acc = accuracy_score(y.detach().numpy(), preds.detach().numpy())
-    f1 = f1_score(y.detach().numpy(), preds.detach().numpy())
-    auc = roc_auc_score(y.detach().numpy(), scores.detach().numpy())
+    acc = accuracy_score(y.detach().cpu().numpy(), preds.detach().cpu().numpy())
+    f1 = f1_score(y.detach().cpu().numpy(), preds.detach().cpu().numpy())
+    auc = roc_auc_score(y.detach().cpu().numpy(), scores.detach().cpu().numpy())
     return loss, acc, f1, auc
     
 def train_model(model, dataloaders, criterion, optimizer, save_dir, num_epochs=25, is_inception=False, limit_batches=-1):
