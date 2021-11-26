@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=iwildcam_nocorr.job
-#SBATCH --output=iwildcam_nocorr.out
+#SBATCH --job-name=slurm_logs/iwildcam_nocorr.job
+#SBATCH --output=slurm_logs/iwildcam_nocorr.out
 #SBATCH --time=5-0
 #SBATCH --nodes=1
 #SBATCH --partition=gpu
