@@ -459,6 +459,7 @@ def run_experiment(
     criterion = nn.BCELoss()
 
     # Train and evaluate
+    os.makedirs(save_dir, exist_ok=True)
     model_ft, hist = train_model(
             model_ft,
             dataloaders_dict,
@@ -488,7 +489,7 @@ if __name__ == '__main__':
     psr.add_argument("--limit_batches", type=int, default=-1)
     psr.add_argument("--root_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/WildsData')
 
-    psr.add_argument("--save_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/saved_models/mnist/run1')
+    psr.add_argument("--save_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/saved_models/')
 
     args = psr.parse_args()
     parsed_opt_kwargs = parse_argdict(args.opt_kwargs)
@@ -507,7 +508,7 @@ if __name__ == '__main__':
         args.opt_name,
         args.lr,
         args.root_dir,
-        args.save_dir,
+        os.path.join(args.save_dir, args.dataset, args.wandb_expt_name), # <save_dir>/<dataset>/<run>
         parsed_opt_kwargs,
         limit_batches=args.limit_batches,
         seed=args.seed,
