@@ -30,30 +30,31 @@ class TwoHeadResNet(torch.nn.Module):
         return torch.sigmoid(classOut), torch.sigmoid(domainOut)
 
 
-# class TwoHeadDenseNet(torch.nn.Module):
-#     def __init__(self, densenetModel):
-#         """
-#         In the constructor we instantiate two nn.Linear modules and assign them as
-#         member variables.
-#         """
-#         super(TwoHeadDenseNet, self).__init__()
-#         self.l_input_size = densenetModel.fc.in_features
-#         self.densenetBackbone = torch.nn.Sequential(*(list(densenetModel.children())[:-1]))
+class TwoHeadDenseNet(torch.nn.Module):
+    def __init__(self, densenetModel):
+        """
+        In the constructor we instantiate two nn.Linear modules and assign them as
+        member variables.
+        """
+        super(TwoHeadDenseNet, self).__init__()
+        print(densenetModel)
+        self.l_input_size = densenetModel.classifier.in_features
+        self.densenetBackbone = torch.nn.Sequential(*(list(densenetModel.children())[:-1]))
 
-#         self.classHead = torch.nn.Linear(self.l_input_size, 1)
-#         self.domainHead = torch.nn.Linear(self.l_input_size, 1)
+        self.classHead = torch.nn.Linear(self.l_input_size, 1)
+        self.domainHead = torch.nn.Linear(self.l_input_size, 1)
 
-#     def forward(self, x):
-#         """
-#         In the forward function we accept a Tensor of input data and we must return
-#         a Tensor of output data. We can use Modules defined in the constructor as
-#         well as arbitrary operators on Tensors.
-#         """
-#         backboneOut = self.densenetBackbone(x)
-#         backboneOut = backboneOut.view(-1, self.l_input_size)
-#         classOut = self.classHead(backboneOut)
-#         domainOut = self.domainHead(backboneOut)
-#         return torch.sigmoid(classOut), torch.sigmoid(domainOut)
+    def forward(self, x):
+        """
+        In the forward function we accept a Tensor of input data and we must return
+        a Tensor of output data. We can use Modules defined in the constructor as
+        well as arbitrary operators on Tensors.
+        """
+        backboneOut = self.densenetBackbone(x)
+        backboneOut = backboneOut.view(-1, self.l_input_size)
+        classOut = self.classHead(backboneOut)
+        domainOut = self.domainHead(backboneOut)
+        return torch.sigmoid(classOut), torch.sigmoid(domainOut)
 
 def set_parameter_requires_grad(model, feature_extracting):
     if feature_extracting:
@@ -113,7 +114,7 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         model_ft.classifier = nn.Linear(num_ftrs, num_classes)
         input_size = 224
 
-        model_ft_2head = TwoHeadResNet(model_ft) # TODO: generalize to multiple model types
+        model_ft_2head = TwoHeadDenseNet(model_ft) # TODO: generalize to multiple model types
 
     elif model_name == "inception":
         """ Inception v3
