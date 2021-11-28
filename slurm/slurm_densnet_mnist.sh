@@ -11,5 +11,4 @@ echo LEGGOO
 module list
 nvidia-smi
 source ~/eecs542_final/env542/bin/activate
-python ~/eecs542_final/training_pipeline.py --n_epochs 10 --model_name densenet --opt_name Adam --lr 1e-3 --dataset mnist --wandb_expt_name patr-test
- --batch_size 511 --num_workers 16 # sync afterwards
+python ~/eecs542_final/training_pipeline.py --n_epochs 10 --model_name densenet --opt_name Adam --lr 1e-3 --dataset mnist --wandb_expt_name patr-test --batch_size 511 --num_workers 16 # sync afterwards

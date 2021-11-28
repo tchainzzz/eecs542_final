@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torchvision import models
+import torch.nn.functional as F
 
 
 #called resnet but also works for other architectures
@@ -37,9 +38,9 @@ class TwoHeadDenseNet(torch.nn.Module):
         member variables.
         """
         super(TwoHeadDenseNet, self).__init__()
-        print(densenetModel)
         self.l_input_size = densenetModel.classifier.in_features
         self.densenetBackbone = torch.nn.Sequential(*(list(densenetModel.children())[:-1]))
+
 
         self.classHead = torch.nn.Linear(self.l_input_size, 1)
         self.domainHead = torch.nn.Linear(self.l_input_size, 1)
@@ -50,6 +51,11 @@ class TwoHeadDenseNet(torch.nn.Module):
         a Tensor of output data. We can use Modules defined in the constructor as
         well as arbitrary operators on Tensors.
         """
+
+        # only works on pictures at least 32 in size, mnist is 28
+        if x.shape[2] < 32 or x.shape[3] < 32:
+             x = F.pad(x, (2,2,2,2), "constant", 0)
+
         backboneOut = self.densenetBackbone(x)
         backboneOut = backboneOut.view(-1, self.l_input_size)
         classOut = self.classHead(backboneOut)
