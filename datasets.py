@@ -10,6 +10,8 @@ from torchvision import datasets
 from torchvision import transforms as T
 from wilds import get_dataset
 
+from RandAugment import RandAugment
+
 class CorrelatedWILDSDataset(Dataset):
     def __init__(
         self,
@@ -21,6 +23,8 @@ class CorrelatedWILDSDataset(Dataset):
         domains=[0, 1],
         normalize=False,
         seed=42,
+        augment='none',
+        rand_args=(0,0),
     ):
         torch.manual_seed(seed)
         self.normalize = normalize
@@ -51,6 +55,9 @@ class CorrelatedWILDSDataset(Dataset):
         self.domains[self.domains == domains[0]] = 0
         self.domains[self.domains == domains[1]] = 1
 
+        self.augment = augment
+        self.rand_augment = RandAugment(rand_args[0],rand_args[1])
+
     def get_correlation_sampler(self, spurious_match_prob):
         """
             This sampler needs to satisfy:
@@ -66,6 +73,10 @@ class CorrelatedWILDSDataset(Dataset):
 
     def __getitem__(self, idx):
         X = self.get_input(idx)
+
+        if self.augment == 'rand_augment':
+            X = self.rand_augment(X)
+
         X = self.preprocess(X)
         if self.transform:
             X = self.transform(X)
@@ -106,7 +117,7 @@ class CorrelatedIWildcam(CorrelatedWILDSDataset):
 class CorrelatedMNIST(Dataset):
     def __init__(
         self,
-	root_dir="/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/ctrenton/MNIST/",
+	    root_dir="/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/ctrenton/MNIST/",
         mode="train",
         transform=None,
         spurious_feature_fn=T.RandomRotation(degrees=90),
@@ -114,6 +125,9 @@ class CorrelatedMNIST(Dataset):
         digits=[2, 8],
         normalize=False,
         seed=42,
+        augment='none',
+        rand_args=(0,0),
+
     ):
         torch.manual_seed(seed)
 
@@ -145,15 +159,29 @@ class CorrelatedMNIST(Dataset):
         self.labels[self.labels == digits[1]] = 1
         self.images = data.data[idx1 | idx2]
 
+        self.augment = augment
+        #self.rand_augment = RandAugment(rand_args[0],rand_args[1])
+        self.rand_processing = T.Compose([
+                T.ToPILImage(),
+                RandAugment(rand_args[0],rand_args[1]),
+                T.ToTensor(),
+            ])
+
+
     def __getitem__(self, idx):
+        #print('data type ' + str(type(self.images[idx])))
         X = self.images[idx].unsqueeze(0).float()
         X = X.repeat([3, 1, 1])
+
         y = self.labels[idx]
         """
             Randomly draw domain:
 
             z ~ Ber(sqrt(spurious_match_prob) * y + (1 - sqrt(spurious_match_prob)) * (1-y))
         """
+        if self.augment == 'rand_augment':
+            X = self.rand_processing(X)
+
         domain_threshold = self.spurious_match_prob if y else 1 - self.spurious_match_prob
         z = (torch.rand(1) < domain_threshold).int().squeeze()
         if z == 1:
@@ -165,6 +193,7 @@ class CorrelatedMNIST(Dataset):
                     mean=[0.485, 0.456, 0.406],
                     std=[0.229, 0.224, 0.225],
                 )(X)
+
         return X, y, z 
 
     def __len__(self):
