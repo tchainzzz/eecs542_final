@@ -51,7 +51,8 @@ class TwoHeadDenseNet(torch.nn.Module):
         a Tensor of output data. We can use Modules defined in the constructor as
         well as arbitrary operators on Tensors.
         """
-
+        print("Shape of training input:")
+        print(x.shape)
         # only works on pictures at least 32 in size, mnist is 28
         if x.shape[2] < 32 or x.shape[3] < 32:
              x = F.pad(x, (2,2,2,2), "constant", 0)
