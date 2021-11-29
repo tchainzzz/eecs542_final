@@ -30,7 +30,7 @@ class TwoHeadResNet(torch.nn.Module):
         poolOut = poolOut.squeeze(-1).squeeze(-1)
         classOut = self.classHead(poolOut)
         domainOut = self.domainHead(poolOut)
-        return torch.sigmoid(classOut), torch.sigmoid(domainOut)
+        return torch.sigmoid(classOut), torch.sigmoid(domainOut), poolOut
 
 
 class TwoHeadDenseNet(torch.nn.Module):
@@ -63,7 +63,7 @@ class TwoHeadDenseNet(torch.nn.Module):
         poolOut = poolOut.squeeze(-1).squeeze(-1)
         classOut = self.classHead(poolOut)
         domainOut = self.domainHead(poolOut)
-        return torch.sigmoid(classOut), torch.sigmoid(domainOut)
+        return torch.sigmoid(classOut), torch.sigmoid(domainOut), poolOut
 
 def set_parameter_requires_grad(model, feature_extracting):
     if feature_extracting:
