@@ -18,6 +18,8 @@ from models import *
 from torchvision import transforms
 from utils import parse_argdict
 
+from regularizers import mmd_penalty
+
 from RandAugment import RandAugment
 
 # Logging
@@ -28,7 +30,7 @@ import wandb
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("Using device", device)
 
-def do_phase(phase, model, pbar, criterion=None, optimizer=None, limit_batches=-1):
+def do_phase(phase, model, pbar, criterion=None, mmd=0., optimizer=None, limit_batches=-1):
     if phase == 'train':
         model.train()  # Set model to training mode
         assert optimizer is not None, "You need to have an optimizer to, uh, optimize stuff."
@@ -71,10 +73,14 @@ def do_phase(phase, model, pbar, criterion=None, optimizer=None, limit_batches=-
         # track history if only in train
         with torch.set_grad_enabled(phase == 'train'):
             # Get model outputs and calculate loss
-            scores_class, scores_domain = model(inputs) # list of probabilities with shape (1, batch_size)
+            scores_class, scores_domain, features = model(inputs) # list of probabilities with shape (1, batch_size) # todo: also output logits
             if criterion:
                 loss_class = criterion(scores_class, labels)
                 loss_domain = criterion(scores_domain, domains)
+                if mmd != 0:
+                    Z0_mask = (domains.squeeze(-1) == 0)
+                    Z1_mask = (domains.squeeze(-1) == 1)
+                    loss_class += mmd * mmd_penalty(features[Z0_mask], features[Z1_mask]) # features should be the pooled backbone outputs
 
             preds_class = torch.where(scores_class < 0.5, 0, 1)
             preds_domain = torch.where(scores_domain < 0.5, 0, 1)
@@ -126,7 +132,7 @@ def calculate_epoch_metrics(loss, y, preds, scores):
     auc = roc_auc_score(y.detach().cpu().numpy(), scores.detach().cpu().numpy())
     return loss, acc, f1, auc
     
-def train_model(model, dataloaders, criterion, optimizer, save_dir, num_epochs=25, is_inception=False, limit_batches=-1):
+def train_model(model, dataloaders, criterion, optimizer, save_dir, num_epochs=25, is_inception=False, mmd=0., limit_batches=-1):
     since = time.time()
 
     val_acc_history = []
@@ -140,7 +146,7 @@ def train_model(model, dataloaders, criterion, optimizer, save_dir, num_epochs=2
             print("Starting ", phase, " phase")
             pbar = tqdm(enumerate(dataloaders[phase]), total=len(dataloaders[phase]))
             pbar.set_description(f"{phase.upper()} - Epoch {epoch+1} / {num_epochs}")
-            model, running_loss_class, all_y, all_preds, all_scores, running_loss_domain, all_domains, all_domain_preds, all_domain_scores = do_phase(phase, model, pbar, criterion=criterion, optimizer=optimizer, limit_batches=limit_batches)
+            model, running_loss_class, all_y, all_preds, all_scores, running_loss_domain, all_domains, all_domain_preds, all_domain_scores = do_phase(phase, model, pbar, criterion=criterion, optimizer=optimizer, mmd=mmd, limit_batches=limit_batches)
 
             epoch_loss_class, epoch_acc_class, epoch_f1_class, epoch_auc_class = calculate_epoch_metrics(running_loss_class, all_y, all_preds, all_scores)
             epoch_loss_domain, epoch_acc_domain, epoch_f1_domain, epoch_auc_domain = calculate_epoch_metrics(running_loss_domain, all_domains, all_domain_preds, all_domain_scores)
@@ -286,6 +292,7 @@ def run_experiment(
         num_workers=4,
         augment='none',
         rand_args=(0,0),
+        mmd=0.,
 ):
     print("PyTorch Version: ", torch.__version__)
     print("Torchvision Version: ", torchvision.__version__)
@@ -384,6 +391,7 @@ def run_experiment(
             save_dir,
             num_epochs=n_epochs,
             is_inception=(model_name == "inception"),
+            mmd=mmd,
             limit_batches=limit_batches,
         )
 
@@ -410,6 +418,8 @@ if __name__ == '__main__':
     psr.add_argument("--ra_n",type=int,default = 0)
     psr.add_argument("--ra_m",type=int,default = 0)
 
+    psr.add_argument("--mmd", type=float, default=0)
+
     args = psr.parse_args()
     parsed_opt_kwargs = parse_argdict(args.opt_kwargs)
     
@@ -434,6 +444,7 @@ if __name__ == '__main__':
         seed=args.seed,
         num_workers=args.num_workers,
         augment=args.augment,
-        rand_args=(args.ra_n,args.ra_m)
+        rand_args=(args.ra_n,args.ra_m),
+        mmd=args.mmd,
     )
 
