@@ -15,6 +15,7 @@ class TwoHeadResNet(torch.nn.Module):
         self.l_input_size = resnetModel.fc.in_features
         self.resnetBackbone = torch.nn.Sequential(*(list(resnetModel.children())[:-1]))
 
+        self.pooling = torch.nn.AdaptiveAvgPool2d(1)
         self.classHead = torch.nn.Linear(self.l_input_size, 1)
         self.domainHead = torch.nn.Linear(self.l_input_size, 1)
 
@@ -25,9 +26,10 @@ class TwoHeadResNet(torch.nn.Module):
         well as arbitrary operators on Tensors.
         """
         backboneOut = self.resnetBackbone(x)
-        backboneOut = backboneOut.view(-1, self.l_input_size)
-        classOut = self.classHead(backboneOut)
-        domainOut = self.domainHead(backboneOut)
+        poolOut = self.pooling(backboneOut)
+        poolOut = poolOut.squeeze(-1).squeeze(-1)
+        classOut = self.classHead(poolOut)
+        domainOut = self.domainHead(poolOut)
         return torch.sigmoid(classOut), torch.sigmoid(domainOut)
 
 
@@ -41,7 +43,7 @@ class TwoHeadDenseNet(torch.nn.Module):
         self.l_input_size = densenetModel.classifier.in_features
         self.densenetBackbone = torch.nn.Sequential(*(list(densenetModel.children())[:-1]))
 
-
+        self.pooling = torch.nn.AdaptiveAvgPool2d(1)
         self.classHead = torch.nn.Linear(self.l_input_size, 1)
         self.domainHead = torch.nn.Linear(self.l_input_size, 1)
 
@@ -57,9 +59,10 @@ class TwoHeadDenseNet(torch.nn.Module):
              x = F.pad(x, (2,2,2,2), "constant", 0)
 
         backboneOut = self.densenetBackbone(x)
-        backboneOut = backboneOut.view(-1, self.l_input_size)
-        classOut = self.classHead(backboneOut)
-        domainOut = self.domainHead(backboneOut)
+        poolOut = self.pooling(backboneOut)
+        poolOut = poolOut.squeeze(-1).squeeze(-1)
+        classOut = self.classHead(poolOut)
+        domainOut = self.domainHead(poolOut)
         return torch.sigmoid(classOut), torch.sigmoid(domainOut)
 
 def set_parameter_requires_grad(model, feature_extracting):
@@ -76,7 +79,7 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
     if model_name == "resnet":
         """ Resnet18
         """
-        model_ft = models.resnet18(pretrained=use_pretrained)
+        model_ft = models.resnet50(pretrained=use_pretrained)
         set_parameter_requires_grad(model_ft, feature_extract)
         num_ftrs = model_ft.fc.in_features
         model_ft.fc = nn.Linear(num_ftrs, num_classes)
@@ -137,9 +140,6 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
         input_size = 299
 
     else:
-        print("Invalid model name, exiting...")
-        exit()
-
-
-    
-    return model_ft_2head, input_size
+        raise ValueError(f"Model name '{model_name}' not recognized.")
+ 
+    return model_ft_2head 

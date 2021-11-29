@@ -304,7 +304,7 @@ def run_experiment(
     feature_extract = True
 
     # Initialize the model for this run
-    model_ft, input_size = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
+    model_ft = initialize_model(model_name, num_classes, feature_extract, use_pretrained=True)
 
     # Print the model we just instantiated
     print(model_ft)
