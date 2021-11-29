@@ -13,39 +13,16 @@ from tqdm.auto import tqdm
 
 import datasets
 import torchvision
-# from torchvision import models, transforms
+from torchvision import models, transforms
 from models import *
 from torchvision import transforms
 from utils import parse_argdict
 
+from RandAugment import RandAugment
+
 # Logging
 import wandb
 
-#note: originally designed for resnet but should work on anything that can use sequential (for first iteration of this implementation)
-# class TwoHeadResNet(torch.nn.Module):
-#     def __init__(self, resnetModel):
-#         """
-#         In the constructor we instantiate two nn.Linear modules and assign them as
-#         member variables.
-#         """
-#         super(TwoHeadResNet, self).__init__()
-#         self.l_input_size = resnetModel.fc.in_features
-#         self.resnetBackbone = torch.nn.Sequential(*(list(resnetModel.children())[:-1]))
-
-#         self.classHead = torch.nn.Linear(self.l_input_size, 1)
-#         self.domainHead = torch.nn.Linear(self.l_input_size, 1)
-
-#     def forward(self, x):
-#         """
-#         In the forward function we accept a Tensor of input data and we must return
-#         a Tensor of output data. We can use Modules defined in the constructor as
-#         well as arbitrary operators on Tensors.
-#         """
-#         backboneOut = self.resnetBackbone(x)
-#         backboneOut = backboneOut.view(-1, self.l_input_size)
-#         classOut = self.classHead(backboneOut)
-#         domainOut = self.domainHead(backboneOut)
-#         return torch.sigmoid(classOut), torch.sigmoid(domainOut)
 
 # Detect if we have a GPU available
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -205,86 +182,7 @@ def train_model(model, dataloaders, criterion, optimizer, save_dir, num_epochs=2
 def build_optimizer(opt_name, model, **kwargs):
     return getattr(torch.optim, opt_name)(model.parameters(), **kwargs)
 
-# def set_parameter_requires_grad(model, feature_extracting):
-#     if feature_extracting:
-#         for param in model.parameters():
-#             param.requires_grad = False
-
-# def initialize_model(model_name, num_classes, feature_extract, use_pretrained=True):
-#     # Initialize these variables which will be set in this if statement. Each of these
-#     #   variables is model specific.
-#     model_ft = None
-#     input_size = 0
-
-#     if model_name == "resnet":
-#         """ Resnet18
-#         """
-#         model_ft = models.resnet18(pretrained=use_pretrained)
-#         set_parameter_requires_grad(model_ft, feature_extract)
-#         num_ftrs = model_ft.fc.in_features
-#         model_ft.fc = nn.Linear(num_ftrs, num_classes)
-#         input_size = 224
-
-#     elif model_name == "alexnet":
-#         """ Alexnet
-#         """
-#         model_ft = models.alexnet(pretrained=use_pretrained)
-#         set_parameter_requires_grad(model_ft, feature_extract)
-#         num_ftrs = model_ft.classifier[6].in_features
-#         model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
-#         input_size = 224
-
-#     elif model_name == "vgg":
-#         """ VGG11_bn
-#         """
-#         model_ft = models.vgg11_bn(pretrained=use_pretrained)
-#         set_parameter_requires_grad(model_ft, feature_extract)
-#         num_ftrs = model_ft.classifier[6].in_features
-#         model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
-#         input_size = 224
-
-#     elif model_name == "squeezenet":
-#         """ Squeezenet
-#         """
-#         model_ft = models.squeezenet1_0(pretrained=use_pretrained)
-#         set_parameter_requires_grad(model_ft, feature_extract)
-#         model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1, 1), stride=(1, 1))
-#         model_ft.num_classes = num_classes
-#         input_size = 224
-
-#     elif model_name == "densenet":
-#         """ Densenet
-#         """
-#         model_ft = models.densenet121(pretrained=use_pretrained)
-#         set_parameter_requires_grad(model_ft, feature_extract)
-#         num_ftrs = model_ft.classifier.in_features
-#         model_ft.classifier = nn.Linear(num_ftrs, num_classes)
-#         input_size = 224
-
-#     elif model_name == "inception":
-#         """ Inception v3
-#         Be careful, expects (299,299) sized images and has auxiliary output
-#         """
-#         model_ft = models.inception_v3(pretrained=use_pretrained)
-#         set_parameter_requires_grad(model_ft, feature_extract)
-#         # Handle the auxilary net
-#         num_ftrs = model_ft.AuxLogits.fc.in_features
-#         model_ft.AuxLogits.fc = nn.Linear(num_ftrs, num_classes)
-#         # Handle the primary net
-#         num_ftrs = model_ft.fc.in_features
-#         model_ft.fc = nn.Linear(num_ftrs, num_classes)
-#         input_size = 299
-
-#     else:
-#         print("Invalid model name, exiting...")
-#         exit()
-
-
-#     model_ft_2head = TwoHeadResNet(model_ft) # TODO: generalize to multiple model types
-#     return model_ft_2head, input_size
-
-
-def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers, test_only=False):
+def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers, augment,rand_args, test_only=False,):
     if test_only:
         train_dl = None
     if dataset_name == 'mnist':
@@ -294,6 +192,8 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers,
                     spurious_match_prob=corr,
                     seed=seed,
                     root_dir=root_dir,
+                    augment=augment,
+                    rand_args=rand_args,
                 )
             train_dl = DataLoader(train_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
         test_dataset = datasets.CorrelatedMNIST(
@@ -301,6 +201,8 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers,
                 spurious_match_prob=corr,
                 seed=seed,
                 root_dir=root_dir,
+                augment='none',
+                rand_args=(0,0)
             )
         test_dl = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
     elif dataset_name in ['camelyon17', 'iwildcam']:
@@ -313,6 +215,8 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers,
                     domains=[0, 3],
                     normalize=True,
                     seed=42,
+                    augment=augment,
+                    rand_args=rand_args,
                 )
             elif dataset_name == 'iwildcam':
                 train_dataset = datasets.CorrelatedIWildcam(
@@ -322,6 +226,8 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers,
                     domains=[139, 230],
                     normalize=True,
                     seed=42,
+                    augment=augment,
+                    rand_args=rand_args,
                 )
 
             train_dl = DataLoader(
@@ -339,6 +245,8 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers,
                     domains=[0, 3],
                     normalize=True,
                     seed=42,
+                    augment='none',
+                    rand_args=(0,0),
                 )
         elif dataset_name == 'iwildcam':
             test_dataset = datasets.CorrelatedIWildcam(
@@ -348,6 +256,8 @@ def get_dataloaders(dataset_name, root_dir, corr, seed, batch_size, num_workers,
                     domains=[139, 230],
                     normalize=True,
                     seed=42,
+                    augment='none',
+                    rand_args=(0,0),
                 )
         test_dl = DataLoader(
                 test_dataset,
@@ -374,6 +284,8 @@ def run_experiment(
         limit_batches=-1,
         seed=42,
         num_workers=4,
+        augment='none',
+        rand_args=(0,0),
 ):
     print("PyTorch Version: ", torch.__version__)
     print("Torchvision Version: ", torchvision.__version__)
@@ -400,20 +312,20 @@ def run_experiment(
     #----------------------------------- LOAD DATA -----------------------------------
     # Data augmentation and normalization for training
     # Just normalization for validation
-    data_transforms = {
-        'train': transforms.Compose([
-            transforms.RandomResizedCrop(input_size),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ]),
-        'val': transforms.Compose([
-            transforms.Resize(input_size),
-            transforms.CenterCrop(input_size),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ]),
-    }
+    # data_transforms = {
+    #     'train': transforms.Compose([
+    #         transforms.RandomResizedCrop(input_size),
+    #         transforms.RandomHorizontalFlip(),
+    #         transforms.ToTensor(),
+    #         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    #     ]),
+    #     'val': transforms.Compose([
+    #         transforms.Resize(input_size),
+    #         transforms.CenterCrop(input_size),
+    #         transforms.ToTensor(),
+    #         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    #     ]),
+    # }
 
     print("Initializing Datasets and Dataloaders...")
 
@@ -421,7 +333,7 @@ def run_experiment(
     # image_datasets = {x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x]) for x in ['train', 'val']}
     # # Create training and validation dataloaders
     # dataloaders_dict = {x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=4) for x in ['train', 'val']}
-    train_dl, val_dl = get_dataloaders(dataset_name, root_dir,corr, seed, batch_size, num_workers)
+    train_dl, val_dl = get_dataloaders(dataset_name, root_dir,corr, seed, batch_size, num_workers,augment,rand_args)
 
     dataloaders_dict = {
         "train": train_dl,
@@ -494,6 +406,9 @@ if __name__ == '__main__':
     psr.add_argument("--root_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/WildsData')
 
     psr.add_argument("--save_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/saved_models/')
+    psr.add_argument("--augment", type=str, choices=['none','rand_augment'], default = 'none')
+    psr.add_argument("--ra_n",type=int,default = 0)
+    psr.add_argument("--ra_m",type=int,default = 0)
 
     args = psr.parse_args()
     parsed_opt_kwargs = parse_argdict(args.opt_kwargs)
@@ -514,8 +429,11 @@ if __name__ == '__main__':
         args.root_dir,
         os.path.join(args.save_dir, args.dataset, args.wandb_expt_name), # <save_dir>/<dataset>/<run>
         parsed_opt_kwargs,
+
         limit_batches=args.limit_batches,
         seed=args.seed,
         num_workers=args.num_workers,
+        augment=args.augment,
+        rand_args=(args.ra_n,args.ra_m)
     )
 
