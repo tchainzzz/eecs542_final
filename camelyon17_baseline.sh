@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=slurm_out/camelyon17_baseline.job
-#SBATCH --output=slurm_out/camelyon17_baseline.out
+#SBATCH --job-name=slurm_logs/camelyon17_baseline.job
+#SBATCH --output=slurm_logs/camelyon17_baseline.out
 #SBATCH --time=12:00:00
 #SBATCH --nodes=1
 #SBATCH --partition=gpu
