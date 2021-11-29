@@ -11,5 +11,5 @@
 module list
 nvidia-smi
 
-pip3 install --user -r requirements.txt
-python3 training_pipeline.py --n_epochs 100 --model_name resnet34 --opt_name Adam --lr 1e-3 --dataset mnist --wandb_expt_name mnist_corr0.9_resnet34 --corr 0.9 --batch_size 512 --num_workers 16 # sync afterwards
+pip install --user -r requirements.txt
+python training_pipeline.py --n_epochs 100 --model_name resnet34 --opt_name Adam --lr 1e-3 --dataset mnist --wandb_expt_name mnist_corr0.9_resnet34 --corr 0.9 --batch_size 512 --num_workers 16
