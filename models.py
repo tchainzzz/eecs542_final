@@ -87,6 +87,33 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Tr
 
         model_ft_2head = TwoHeadResNet(model_ft) # TODO: generalize to multiple model types
 
+		if model_name == "resnet34":
+        """ Resnet34
+        """
+        model_ft = models.resnet34(pretrained=use_pretrained)
+        set_parameter_requires_grad(model_ft, feature_extract)
+        num_ftrs = model_ft.fc.in_features
+        model_ft.fc = nn.Linear(num_ftrs, num_classes)
+        input_size = 224
+
+	elif model_name == "resnet50":
+        """ Resnet50
+        """
+        model_ft = models.resnet50(pretrained=use_pretrained)
+        set_parameter_requires_grad(model_ft, feature_extract)
+        num_ftrs = model_ft.fc.in_features
+        model_ft.fc = nn.Linear(num_ftrs, num_classes)
+        input_size = 224
+
+	elif model_name == "resnet101":
+        """ Resnet101
+        """
+        model_ft = models.resnet101(pretrained=use_pretrained)
+        set_parameter_requires_grad(model_ft, feature_extract)
+        num_ftrs = model_ft.fc.in_features
+        model_ft.fc = nn.Linear(num_ftrs, num_classes)
+        input_size = 224
+
     elif model_name == "alexnet":
         """ Alexnet
         """
