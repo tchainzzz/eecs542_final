@@ -396,7 +396,7 @@ if __name__ == '__main__':
     psr.add_argument("--wandb_expt_name", type=str, required=True)
 
     psr.add_argument("--num_workers", default=os.cpu_count() // 2, type=int)
-    psr.add_argument("--model_name", choices=['resnet','densenet'], type=str, required=True)
+    psr.add_argument("--model_name", choices=['resnet18','resnet34', 'resnet50', 'resnet', 'resnet101', 'densenet'], type=str, required=True)
     psr.add_argument("--batch_size", default=32, type=int)
     psr.add_argument("--n_epochs", default=5, type=int)
     psr.add_argument("--opt_name", default="SGD", type=str)
