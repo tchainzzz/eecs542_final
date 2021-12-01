@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=mnist_resnet34.job
-#SBATCH --output=mnist_resnet34.out
-#SBATCH --time=1-0
+#SBATCH --job-name=slurm_logs/mnist_resnet34.job
+#SBATCH --output=slurm_logs/mnist_resnet34.out
+#SBATCH --time=2:00:00
 #SBATCH --nodes=1
 #SBATCH --partition=gpu
 #SBATCH --gpus-per-node=v100:1
