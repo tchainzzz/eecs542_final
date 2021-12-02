@@ -7,6 +7,9 @@ from tqdm.auto import tqdm
 from training_pipeline import calculate_epoch_metrics, do_phase, get_dataloaders, initialize_model
 from models import *
 
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 if __name__ == '__main__':
     psr = ArgumentParser()
     psr.add_argument("--model_file", type=str, required=True)
@@ -18,10 +21,13 @@ if __name__ == '__main__':
     psr.add_argument("--seed", type=int, default=42)
     psr.add_argument("--root_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/WildsData/camelyon17_v1.0')
     psr.add_argument("--no-state-dict", action='store_true')
+    psr.add_argument("--augment", type=str, choices=['none','rand_augment'], default = 'none')
+    psr.add_argument("--ra_n",type=int,default = 0)
+    psr.add_argument("--ra_m",type=int,default = 0)
     args = psr.parse_args()
 
     print("Loading model...")
-    model, _ = initialize_model(
+    model = initialize_model(
          args.model_name,
          2, # num classes is always 2
          True, # set this feature extraction flag to true to freeze stuff
@@ -32,6 +38,7 @@ if __name__ == '__main__':
     else: # need to extract the state dict from the model file
         weights = torch.load(args.model_file).state_dict() 
     model.load_state_dict(weights)
+    model.to(device)
     model.eval()
 
     print("Loading dataset...")
@@ -42,6 +49,8 @@ if __name__ == '__main__':
         args.seed,
         args.batch_size,
         args.num_workers,
+        args.augment,
+        (args.ra_n, args.ra_m),
         test_only=True,
     )
 
