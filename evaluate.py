@@ -19,7 +19,7 @@ if __name__ == '__main__':
     psr.add_argument("--batch_size", type=int, default=32)
     psr.add_argument("--num_workers", type=int, default=os.cpu_count() // 2)
     psr.add_argument("--seed", type=int, default=42)
-    psr.add_argument("--root_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/WildsData/camelyon17_v1.0')
+    psr.add_argument("--root_dir", type=str, default='/scratch/eecs542f21_class_root/eecs542f21_class/shared_data/dssr_datasets/WildsData/')
     psr.add_argument("--no-state-dict", action='store_true')
     psr.add_argument("--augment", type=str, choices=['none','rand_augment'], default = 'none')
     psr.add_argument("--ra_n",type=int,default = 0)

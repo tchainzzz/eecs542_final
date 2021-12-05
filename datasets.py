@@ -10,7 +10,7 @@ from torchvision import datasets
 from torchvision import transforms as T
 from wilds import get_dataset
 
-from RandAugment import RandAugment
+#from RandAugment import RandAugment
 
 class CorrelatedWILDSDataset(Dataset):
     def __init__(
@@ -56,7 +56,7 @@ class CorrelatedWILDSDataset(Dataset):
         self.domains[self.domains == domains[1]] = 1
 
         self.augment = augment
-        self.rand_augment = RandAugment(rand_args[0],rand_args[1])
+        #self.rand_augment = RandAugment(rand_args[0],rand_args[1])
 
     def get_correlation_sampler(self, spurious_match_prob):
         """
