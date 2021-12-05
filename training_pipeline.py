@@ -20,8 +20,6 @@ from utils import parse_argdict
 
 from regularizers import mmd_penalty
 
-from RandAugment import RandAugment
-
 # Logging
 import wandb
 

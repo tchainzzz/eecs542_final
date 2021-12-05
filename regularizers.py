@@ -1,7 +1,7 @@
-import numpy as np
+import torch
 
 def rbf(x1, x2, gamma=0.5):
-    return np.exp(-gamma * np.square(x1 - x2).sum())
+    return torch.exp(-gamma * torch.square(x1 - x2).sum())
 
 
 def mmd_penalty(Z0, Z1, k_fn=rbf):
